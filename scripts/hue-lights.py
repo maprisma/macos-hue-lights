@@ -824,6 +824,26 @@ class BridgeError(Exception):
     """The bridge answered with CLIP "errors": a fixed message, never the bridge's own text."""
 
 
+def _exceeds_json_depth(root, max_depth=32):
+    """Iterative nesting check so deeply nested JSON returns None even on platforms with large C stacks (macOS arm64)."""
+    stack = [(root, 0)]
+    while stack:
+        node, depth = stack.pop()
+        if isinstance(node, list):
+            if depth >= max_depth:
+                return True
+            for item in node:
+                if isinstance(item, (list, dict)):
+                    stack.append((item, depth + 1))
+        elif isinstance(node, dict):
+            if depth >= max_depth:
+                return True
+            for item in node.values():
+                if isinstance(item, (list, dict)):
+                    stack.append((item, depth + 1))
+    return False
+
+
 def https_request(ip, method, path, body=None, headers=None, pin=None, timeout=HTTP_TIMEOUT, port=None):
     """One HTTPS request to the bridge. Returns (status, parsed_json, (fingerprint, cn)).
 
@@ -889,6 +909,8 @@ def https_request(ip, method, path, body=None, headers=None, pin=None, timeout=H
         raw = b"".join(chunks)
         try:
             parsed = json.loads(raw.decode("utf-8")) if raw else None
+            if parsed is not None and _exceeds_json_depth(parsed):
+                parsed = None
         except (ValueError, RecursionError):
             parsed = None
         return resp.status, parsed, peer
