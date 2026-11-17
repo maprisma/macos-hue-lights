@@ -33,7 +33,7 @@ jobs:
       - name: Python tests with the system /usr/bin/python3
         run: |
           if /usr/bin/python3 -c 'import sys' 2>/dev/null; then
-            /usr/bin/python3 -m unittest tests.test_macos_hue -v
+            /usr/bin/python3 -m unittest discover -s tests -p 'test_macos_hue.py' -v
           else
             echo "No system python3 on this runner; skipped."
           fi
