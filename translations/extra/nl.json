@@ -16,5 +16,17 @@
   "Slightly rounded ({0} px)": "Licht afgerond ({0} px)",
   "Rounded ({0} px)": "Afgerond ({0} px)",
   "Square": "Hoekig",
-  "Could not save the setting.": "De instelling kon niet worden bewaard."
+  "Could not save the setting.": "De instelling kon niet worden bewaard.",
+  "Quit": "Stoppen",
+  "Quit Maprisma Hue Lights": "Maprisma Hue Lights stoppen",
+  "Forget this bridge and its app key on this Mac": "Deze bridge en de app-sleutel op deze Mac vergeten",
+  "All lights off": "Alle lampen uit",
+  "Lights": "Lampen",
+  "Scenes": "Scènes",
+  "Found bridges": "Gevonden bridges",
+  "Or enter the bridge's IP address:": "Of voer het IP-adres van de bridge in:",
+  "Starting the Hue helper …": "Hue-hulpprogramma wordt gestart …",
+  "The Hue helper stopped. Restarting in 5 s …": "Het Hue-hulpprogramma is gestopt. Herstart over 5 s …",
+  "Python 3 was not found. Install the Xcode Command Line Tools (xcode-select --install) or Homebrew python3.": "Python 3 is niet gevonden. Installeer de Xcode Command Line Tools (xcode-select --install) of python3 via Homebrew.",
+  "The helper script is missing from the app.": "Het hulpscript ontbreekt in de app."
 }

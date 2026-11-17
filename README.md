@@ -1,3 +1,86 @@
+# Maprisma Hue Lights for macOS (and COSMIC / KDE)
+
+This repository holds the **macOS port** (a native SwiftUI menu bar app) next to the original
+Linux app. Both use the same bridge helper, `scripts/hue-lights.py`, and the same 8-language
+catalogs in `translations/`.
+
+## macOS (Apple silicon, e.g. M4; macOS 13 Ventura or newer)
+
+A menu bar bulb, **lit** while any light is on and **outlined** when all lights are off or no
+bridge is paired. Click it for a ~430×600 pt window that follows the system's dark/light
+appearance:
+
+- **Pairing:** bridges found automatically (mDNS, then Philips' N-UPnP service, then a scan of the
+  local /24), or a bridge IP typed by hand; **Pair** starts the 35-second push-link countdown:
+  press the round button on the bridge.
+- **Rooms & zones:** one card per room/zone (and "Other lights") with an on/off switch, a
+  brightness slider while on (commands at most every 150 ms while dragging, the final value on
+  release), scene chips (the first 6 and the active one, then **+N more** / **less**), and a chevron
+  that opens the single lights (colour dot, switch, brightness slider if dimmable).
+  **All lights off** and **Refresh** sit at the bottom.
+- **Settings** (gear): interface language (System or English, Deutsch, Français, Español,
+  Italiano, Português, Nederlands, Polski; stored in `~/.config/hue-lights/settings.json`),
+  the paired bridge with **Unpair** (asks again before it acts), and **Quit** (⌘Q).
+- No Dock icon (`LSUIElement`). The app key stays in `~/.config/hue-lights/config.json` (mode 0600,
+  folder 0700) and never leaves the helper; bridge traffic is pinned HTTPS on the LAN only.
+
+### Requirements
+
+- Xcode 15+ or the Command Line Tools (`xcode-select --install`) for Swift 5.9+.
+- Python 3.8+ with only the standard library, so you never need `pip install`. The Command Line Tools'
+  `/usr/bin/python3` (3.9) works, and so does Homebrew's `python3` (`brew install python`). The app
+  looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/bin`, in that order.
+
+### Build, install, run
+
+```sh
+./build-mac.sh            # swift build -c release → dist/Maprisma Hue Lights.app (ad-hoc signed)
+./install-mac.sh          # build + copy to /Applications (if writable) or ~/Applications
+./install-mac.sh --open   # … and launch it
+open "/Applications/Maprisma Hue Lights.app"   # or ~/Applications/…, or Spotlight
+```
+
+`UNIVERSAL=1 ./build-mac.sh` builds an arm64 + x86_64 binary. For a dev run from the checkout,
+use `swift run MaprismaHueLights`. The app then uses `./scripts/hue-lights.py` and
+`./translations/bundled.json` because it is not inside a bundle.
+
+On first start, macOS asks for **Local Network** access. Allow it, or the bridge can't be found
+or reached. You can change it later under System Settings › Privacy & Security › Local Network.
+To start the app at login, add it under System Settings › General › Login Items.
+
+### How it fits together
+
+`Sources/HueCore` (Foundation only) holds the snapshot models, the stdin command protocol, the
+translations, the settings file, the 150 ms brightness debouncer and the **helper supervisor**.
+The supervisor starts `Contents/Resources/scripts/hue-lights.py` via `/usr/bin/env python3 -I`,
+with PATH set to `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` first. It reads JSON snapshot lines
+from stdout on a background thread and writes JSON commands to stdin. When the window opens or
+closes it sends `panel_open` / `panel_closed`, which switches the helper between polling every 2 s
+and every 20 s. If the helper exits, the supervisor starts it again after 5 s. When the app quits
+(Quit, ⌘Q, logout, SIGTERM), the supervisor closes stdin, then sends SIGTERM, then SIGKILL.
+`Sources/MaprismaHueLights` holds the SwiftUI `MenuBarExtra(.window)` app.
+
+The helper protocol is the same as on Linux: commands `panel_open`/`open`, `panel_closed`/`closed`,
+`refresh`, `discover`, `pair {ip}`, `cancel_pair`, `unpair`, `light {id, on?, bri?}`,
+`group {id, on?, bri?}`, `scene {id}`, `all_off`. Each stdout line is a snapshot:
+`phase, error, error_code, error_args, bridge, rooms[lights, scenes], light_count, on_count,
+candidates, discovering, pair_ip, pair_remaining`.
+
+### Tests on the Mac
+
+```sh
+python3 -m unittest discover -s tests -v   # helper + macOS port (no bridge, no internet needed)
+/usr/bin/python3 -m unittest tests.test_macos_hue -v   # the same with the system Python 3.9
+swift test                                 # HueCore: models, translations, debouncer, supervisor
+./build-mac.sh && codesign --verify --deep --strict "dist/Maprisma Hue Lights.app"
+```
+
+`.github/workflows/macos-ci.yml` runs all of this on `macos-latest` (Apple silicon). It checks
+the bundle structure (`Info.plist` with `LSUIElement`, the helper, the translations, the arm64
+binary, the ad-hoc signature), launches the app briefly, and uploads the zipped `.app`.
+
+---
+
 # Maprisma Hue Lights for COSMIC
 
 A native COSMIC panel applet (Rust/libcosmic) for Philips Hue: rooms, zones, lights and

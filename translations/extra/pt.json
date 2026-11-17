@@ -16,5 +16,17 @@
   "Slightly rounded ({0} px)": "Levemente arredondados ({0} px)",
   "Rounded ({0} px)": "Arredondados ({0} px)",
   "Square": "Retos",
-  "Could not save the setting.": "Não foi possível guardar a definição."
+  "Could not save the setting.": "Não foi possível guardar a definição.",
+  "Quit": "Sair",
+  "Quit Maprisma Hue Lights": "Sair do Maprisma Hue Lights",
+  "Forget this bridge and its app key on this Mac": "Esquecer esta bridge e a chave do app neste Mac",
+  "All lights off": "Desligar todas as lâmpadas",
+  "Lights": "Lâmpadas",
+  "Scenes": "Cenas",
+  "Found bridges": "Bridges encontradas",
+  "Or enter the bridge's IP address:": "Ou introduza o endereço IP da bridge:",
+  "Starting the Hue helper …": "A iniciar o assistente Hue …",
+  "The Hue helper stopped. Restarting in 5 s …": "O assistente Hue parou. A reiniciar em 5 s …",
+  "Python 3 was not found. Install the Xcode Command Line Tools (xcode-select --install) or Homebrew python3.": "Python 3 não foi encontrado. Instale as Xcode Command Line Tools (xcode-select --install) ou o python3 do Homebrew.",
+  "The helper script is missing from the app.": "O script auxiliar está em falta na app."
 }

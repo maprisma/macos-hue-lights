@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Philips Hue bridge helper for the Hue Lights GNOME Shell extension.
+"""Philips Hue bridge helper for Maprisma Hue Lights (COSMIC/KDE/GNOME on Linux, the macOS
+menu bar app on macOS). Python 3.8+ standard library only: no pip packages, no openssl binary.
 
 Long-running process: reads one JSON command per line on stdin and prints one
 JSON snapshot per line on stdout. Talks to the bridge's local CLIP v2 API over
@@ -8,6 +9,11 @@ HTTPS only. The bridge certificate is self-signed by Philips, so it is pinned
 connection afterwards. The application key lives in
 $XDG_CONFIG_HOME/hue-lights/config.json (~/.config/hue-lights, mode 0600) and
 never leaves this process.
+
+macOS: the same file (~/.config/hue-lights/config.json, 0600), bridges found with a stdlib mDNS
+query (mDNSResponder answers it; avahi-browse and setpriv are Linux-only and simply skipped),
+Philips' N-UPnP service or a scan of the local /24. Children cannot get a parent-death signal
+there, but the helper exits as soon as the app closes its stdin.
 """
 
 import atexit
@@ -68,6 +74,9 @@ MAX_MEMBERSHIPS = 1000
 # goes to the one group it names, so the model never holds more than MAX_SCENES.
 MAX_GROUP_SCENES = 100
 MAX_SCENES = 1000
+DEEP_SCAN_EVERY = 60.0  # N-UPnP + subnet scan at most once a minute unless "Search again"
+# The macOS app's names for the panel visibility commands (the COSMIC/GNOME panels send open/closed).
+COMMAND_ALIASES = {"panel_open": "open", "panel_closed": "closed"}
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 BRIDGE_ID_RE = re.compile(r"^[0-9A-F]{16}$")
@@ -377,6 +386,258 @@ def parse_avahi_hue(lines):
         name = re.sub(r"\\(\d{3})", lambda mm: chr(int(mm.group(1))), name)
         found[ip] = {"ip": ip, "bridge_id": bridge_id, "name": clean(name)}
     return sorted(found.values(), key=lambda b: b["ip"])
+
+
+MDNS_GROUP = ("224.0.0.251", 5353)
+MDNS_SERVICE = "_hue._tcp.local"
+NUPNP_URL = ("discovery.meethue.com", "/")
+IS_MACOS = sys.platform == "darwin"
+# The app name the bridge lists under "connected apps" (at most 20 characters).
+DEVICE_TYPE = "maprisma_hue_mac" if IS_MACOS else "gnome_hue_lights"
+
+
+def mdns_query(service=MDNS_SERVICE):
+    """One DNS question (PTR, class IN) for `service`, as sent to 224.0.0.251:5353."""
+    packet = b"\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"   # id 0, flags 0, one question
+    for label in service.split("."):
+        raw = label.encode("ascii")
+        packet += bytes([len(raw)]) + raw
+    return packet + b"\x00\x00\x0c\x00\x01"
+
+
+def _dns_name(buf, pos):
+    """(name, next_pos) of a possibly compressed DNS name; pointer loops end in ValueError."""
+    labels, jumps, end = [], 0, None
+    while True:
+        if pos >= len(buf):
+            raise ValueError("truncated name")
+        length = buf[pos]
+        if length & 0xC0 == 0xC0:
+            if pos + 1 >= len(buf):
+                raise ValueError("truncated pointer")
+            if end is None:
+                end = pos + 2
+            pos = ((length & 0x3F) << 8) | buf[pos + 1]
+            jumps += 1
+            if jumps > 32:
+                raise ValueError("name pointer loop")
+            continue
+        if length & 0xC0:
+            raise ValueError("bad label")
+        pos += 1
+        if length == 0:
+            break
+        labels.append(buf[pos:pos + length].decode("utf-8", "replace"))
+        pos += length
+        if len(labels) > 64:
+            raise ValueError("name too long")
+    return ".".join(labels), (end if end is not None else pos)
+
+
+def parse_dns_records(buf):
+    """Every resource record of a DNS reply as (name, type, rdata_start, rdata_end)."""
+    if len(buf) < 12:
+        return []
+    counts = [int.from_bytes(buf[i:i + 2], "big") for i in (4, 6, 8, 10)]
+    pos, records = 12, []
+    try:
+        for _ in range(min(counts[0], 64)):
+            _, pos = _dns_name(buf, pos)
+            pos += 4
+        for _ in range(min(sum(counts[1:]), 256)):
+            name, pos = _dns_name(buf, pos)
+            if pos + 10 > len(buf):
+                break
+            rtype = int.from_bytes(buf[pos:pos + 2], "big")
+            rdlen = int.from_bytes(buf[pos + 8:pos + 10], "big")
+            pos += 10
+            if pos + rdlen > len(buf):
+                break
+            records.append((name.lower(), rtype, pos, pos + rdlen))
+            pos += rdlen
+    except ValueError:
+        pass
+    return records
+
+
+def parse_mdns_hue(packets):
+    """mDNS replies [(bytes, source_ip)] to _hue._tcp into [{ip, bridge_id, name}]."""
+    found = {}
+    for buf, source in packets:
+        instances, srv, txt, addr = [], {}, {}, {}
+        for name, rtype, start, end in parse_dns_records(buf):
+            try:
+                if rtype == 12 and name == MDNS_SERVICE.lower():          # PTR
+                    instances.append(_dns_name(buf, start)[0])
+                elif rtype == 33 and end - start > 6:                      # SRV
+                    srv[name] = _dns_name(buf, start + 6)[0].lower()
+                elif rtype == 16:                                          # TXT
+                    pos, strings = start, []
+                    while pos < end:
+                        length = buf[pos]
+                        strings.append(buf[pos + 1:pos + 1 + length].decode("utf-8", "replace"))
+                        pos += 1 + length
+                    txt[name] = strings
+                elif rtype == 1 and end - start == 4:                      # A
+                    addr[name] = ".".join(str(b) for b in buf[start:end])
+            except (ValueError, IndexError):
+                continue
+        for instance in instances:
+            key = instance.lower()
+            ip = addr.get(srv.get(key, ""), "") or source
+            if not valid_bridge_ip(ip):
+                continue
+            bridge_id = ""
+            for entry in txt.get(key, []):
+                m = re.fullmatch(r"bridgeid=([0-9a-fA-F]{16})", entry)
+                if m:
+                    bridge_id = m.group(1).upper()
+            label = instance.split("." + MDNS_SERVICE.split(".")[0], 1)[0]
+            found[ip] = {"ip": ip, "bridge_id": bridge_id, "name": clean(label) or "Hue Bridge"}
+    return sorted(found.values(), key=lambda b: b["ip"])
+
+
+def mdns_discover(timeout=3.0):
+    """Ask the LAN for _hue._tcp from an ephemeral port (RFC 6762 legacy unicast: the bridge
+    answers this socket directly). Stdlib only, works where mDNSResponder owns port 5353 (macOS)
+    and where avahi-daemon does (Linux)."""
+    packets = []
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    except OSError:
+        return []
+    try:
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+        sock.bind(("", 0))
+        query = mdns_query()
+        deadline = time.monotonic() + timeout
+        next_send = 0.0
+        while True:
+            now = time.monotonic()
+            if now >= deadline or len(packets) >= 64:
+                break
+            if now >= next_send:      # three questions, a second apart (packet loss on Wi-Fi)
+                try:
+                    sock.sendto(query, MDNS_GROUP)
+                except OSError:
+                    pass
+                next_send = now + 1.0
+            ready, _, _ = select.select([sock], [], [], max(0.0, min(deadline, next_send) - now))
+            if ready:
+                try:
+                    data, (source, _) = sock.recvfrom(9000)
+                except OSError:
+                    continue
+                packets.append((data, source))
+    except OSError:
+        pass
+    finally:
+        sock.close()
+    return parse_mdns_hue(packets)
+
+
+def parse_nupnp(data):
+    """discovery.meethue.com's [{"id", "internalipaddress", "port"}] into [{ip, bridge_id, name}]."""
+    found = {}
+    for entry in data if isinstance(data, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        ip = str(entry.get("internalipaddress", ""))
+        if not valid_bridge_ip(ip):
+            continue
+        bridge_id = str(entry.get("id", "")).upper()
+        found[ip] = {"ip": ip, "bridge_id": bridge_id if BRIDGE_ID_RE.match(bridge_id) else "",
+                     "name": "Hue Bridge"}
+    return sorted(found.values(), key=lambda b: b["ip"])
+
+
+def nupnp_discover(timeout=4.0):
+    """Philips' N-UPnP service (the bridge reports its LAN address there). Verified HTTPS, a small
+    capped reply; nothing about this computer is sent. Empty on any failure (offline, no CA store)."""
+    conn = None
+    try:
+        ctx = ssl.create_default_context()
+        conn = http.client.HTTPSConnection(NUPNP_URL[0], 443, timeout=timeout, context=ctx)
+        conn.request("GET", NUPNP_URL[1], headers={"Accept": "application/json",
+                                                   "User-Agent": "hue-lights-helper"})
+        resp = conn.getresponse()
+        if resp.status != 200:
+            return []
+        raw = resp.read(65537)
+        if len(raw) > 65536:
+            return []
+        return parse_nupnp(json.loads(raw.decode("utf-8")))
+    except (OSError, ssl.SSLError, http.client.HTTPException, ValueError, RecursionError):
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def local_ipv4():
+    """This computer's LAN address (the route to a private address; a UDP connect sends nothing)."""
+    # Unicast targets (a broadcast address would need SO_BROADCAST and fail with EACCES).
+    for probe in ("192.168.254.254", "10.254.254.254", "172.31.254.254"):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect((probe, 9))
+            ip = sock.getsockname()[0]
+            if valid_bridge_ip(ip):
+                return ip
+        except OSError:
+            pass
+        finally:
+            sock.close()
+    return ""
+
+
+def subnet_hosts(ip):
+    """The other hosts of `ip`'s /24 (the common home network), [] for anything not private."""
+    if not valid_bridge_ip(ip):
+        return []
+    network = ipaddress.IPv4Network(ip + "/24", strict=False)
+    return [str(h) for h in network.hosts() if str(h) != ip]
+
+
+def probe_bridge(ip, timeout=1.5):
+    """{ip, bridge_id, name} when `ip` answers /api/0/config like a Hue bridge (bridge id equal to
+    the certificate's CN), else None."""
+    try:
+        with socket.create_connection((ip, BRIDGE_PORT), timeout=0.4):
+            pass
+        _, cfg, peer = https_request(ip, "GET", "/api/0/config", timeout=timeout)
+    except (OSError, socket.timeout, http.client.HTTPException, ValueError):
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    bridge_id = str(cfg.get("bridgeid", "")).upper()
+    if not BRIDGE_ID_RE.match(bridge_id) or peer[1] != bridge_id:
+        return None
+    return {"ip": ip, "bridge_id": bridge_id, "name": clean(cfg.get("name") or "Hue Bridge")}
+
+
+def subnet_discover(workers=48, budget=12.0):
+    """Last resort: every host of the local /24 on port 443, a few dozen at a time."""
+    hosts = subnet_hosts(local_ipv4())
+    found, lock, deadline = [], threading.Lock(), time.monotonic() + budget
+
+    def scan():
+        while time.monotonic() < deadline:
+            with lock:
+                if not hosts:
+                    return
+                ip = hosts.pop()
+            result = probe_bridge(ip)
+            if result:
+                with lock:
+                    found.append(result)
+    threads = [threading.Thread(target=scan, daemon=True) for _ in range(min(workers, len(hosts)))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(max(0.0, deadline - time.monotonic()) + 2.0)
+    with lock:
+        return sorted({b["ip"]: b for b in found}.values(), key=lambda b: b["ip"])
 
 
 def parse_command(line):
@@ -823,7 +1084,18 @@ class Hue:
                 return
 
     def discover_now(self):
-        return parse_avahi_hue(run_bounded(["avahi-browse", "-rtpk", "_hue._tcp"]).splitlines())
+        """Bridges on the LAN, cheapest way first: avahi-browse (Linux, when installed), then a
+        stdlib mDNS query (macOS's mDNSResponder, or no avahi tools), then - at most once a
+        minute unless the user asked - Philips' N-UPnP service and a scan of the local /24."""
+        found = []
+        if not IS_MACOS and shutil.which("avahi-browse"):
+            found = parse_avahi_hue(run_bounded(["avahi-browse", "-rtpk", "_hue._tcp"]).splitlines())
+        if not found:
+            found = mdns_discover()
+        if not found and time.time() - getattr(self, "last_deep_scan", 0.0) >= DEEP_SCAN_EVERY:
+            self.last_deep_scan = time.time()
+            found = nupnp_discover() or subnet_discover()
+        return found
 
     def claim_discovery(self):
         """One discovery at a time: True when this caller got the slot."""
@@ -879,7 +1151,7 @@ class Hue:
                     return   # Cancel, Unpair or a new Pair during the first request: no key request
             host = clean(socket.gethostname(), 19) or "pc"
             _, resp, peer2 = https_request(ip, "POST", "/api",
-                                           {"devicetype": "gnome_hue_lights#" + host, "generateclientkey": True})
+                                           {"devicetype": DEVICE_TYPE + "#" + host, "generateclientkey": True})
             if peer2 != peer:
                 raise PinError("certificate changed during pairing")
             entry = resp[0] if isinstance(resp, list) and resp and isinstance(resp[0], dict) else {}
@@ -1028,6 +1300,7 @@ class Hue:
 
     def handle(self, cmd):
         name = cmd.get("cmd")
+        name = COMMAND_ALIASES.get(name, name)
         if name == "open":
             self.panel_open = True
             self.wake.set()
@@ -1037,6 +1310,7 @@ class Hue:
             self.last_refresh = 0
             self.wake.set()
         elif name == "discover":
+            self.last_deep_scan = 0.0   # "Search again": every method, now
             self.start_discovery()
         elif name == "pair":
             ip = str(cmd.get("ip", "")).strip()

@@ -1,0 +1,95 @@
+name: macOS CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    # macos-latest is Apple silicon (arm64), like an M4 Mac.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          uname -m
+          swift --version
+          python3 --version
+          /usr/bin/python3 --version || true
+
+      - name: Python tests (helper, stdlib only)
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Python tests with the system /usr/bin/python3
+        run: |
+          if /usr/bin/python3 -c 'import sys' 2>/dev/null; then
+            /usr/bin/python3 -m unittest tests.test_macos_hue -v
+          else
+            echo "No system python3 on this runner; skipped."
+          fi
+
+      - name: Swift tests (HueCore)
+        run: swift test
+
+      - name: Build app bundle
+        run: ./build-mac.sh
+
+      - name: Verify app bundle
+        run: |
+          set -euo pipefail
+          APP="dist/Maprisma Hue Lights.app"
+          PLIST="$APP/Contents/Info.plist"
+          test -d "$APP"
+          test -x "$APP/Contents/MacOS/MaprismaHueLights"
+          test -x "$APP/Contents/Resources/scripts/hue-lights.py"
+          test -f "$APP/Contents/Resources/translations/bundled.json"
+          plutil -lint "$PLIST"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$PLIST")" = "true"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")" = "MaprismaHueLights"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")" = "13.0"
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$PLIST"
+          lipo -archs "$APP/Contents/MacOS/MaprismaHueLights" | grep -q arm64
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -q "Signature=adhoc"
+          python3 - "$APP/Contents/Resources/translations/bundled.json" <<'EOF'
+          import json, sys
+          catalogs = json.load(open(sys.argv[1]))
+          assert set(catalogs) == {"en", "de", "fr", "es", "it", "pt", "nl", "pl"}, catalogs.keys()
+          EOF
+          # The bundled helper answers with a JSON snapshot and exits on EOF.
+          HOME_DIR="$(mktemp -d)"
+          printf '{"cmd":"panel_closed"}\n' \
+            | XDG_CONFIG_HOME="$HOME_DIR" python3 -I "$APP/Contents/Resources/scripts/hue-lights.py" \
+            | head -n 1 \
+            | python3 -c 'import json, sys; assert json.loads(sys.stdin.readline())["phase"] == "unpaired"'
+          echo "Bundle OK"
+
+      - name: Smoke-launch the app
+        run: |
+          APP="dist/Maprisma Hue Lights.app"
+          "$APP/Contents/MacOS/MaprismaHueLights" &
+          PID=$!
+          sleep 5
+          kill -0 "$PID"          # still running (menu bar app, no window needed)
+          pgrep -f "hue-lights.py" # its helper is up
+          kill -TERM "$PID"
+          sleep 3
+          ! pgrep -f "Contents/Resources/scripts/hue-lights.py"
+
+      - name: Zip app
+        run: ditto -c -k --keepParent "dist/Maprisma Hue Lights.app" "dist/Maprisma-Hue-Lights-macOS.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Maprisma-Hue-Lights-macOS
+          path: dist/Maprisma-Hue-Lights-macOS.zip
