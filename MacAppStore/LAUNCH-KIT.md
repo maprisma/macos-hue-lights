@@ -18,15 +18,20 @@
 
 ### English (`en-US` / `en-GB`)
 - **Name (30 chars max):** `Maprisma Lights` *(15 chars)*
-- **Subtitle (30 chars max):** `Control, Rules & Music for Hue` *(30 chars)*
+- **Subtitle (30 chars max):** `Floorplan, Rules & Music Hue` *(28 chars)*
 - **Promotional Text (170 chars max):**
-  > Native macOS menu bar & window controller for Philips Hue: per-light schedules, linked-light rules, Mac wake/sleep triggers, Light Themes, and live Music Sync. No subscription.
+  > Native macOS Hue controller with Visual Floorplan Studio, 6 prototypes, 12 lamp icons, wired rules, room scene schedules, Light Themes & Music Sync. Zero subscription.
 - **Keywords (100 chars max):**
-  `philips hue,smart home,menu bar,music sync,lights,schedule,automation,led,ambient,color,lamp,scenes`
+  `philips hue,floorplan,smart home,menu bar,music sync,lights,schedule,automation,ambient,lamp,scenes`
 - **Description:**
   > **Take full control of your Philips Hue lights straight from your Mac menu bar — fast, native, private, and with zero subscription.**
   >
   > Maprisma Lights is built natively in Swift for macOS. No browser tabs, no cloud accounts, no monthly fees: it talks directly to your Philips Hue Bridge on your local network over certificate-pinned HTTPS.
+  >
+  > **NEW: Interactive Visual Floorplan & Spatial Light Studio**
+  > - Place your Hue lamps freely on a live 2D home canvas — start from **6 editable house/apartment prototypes** with draggable, rotatable furniture stamps or import your own **custom floorplan background image**.
+  > - Pick from **12 lamp icons**, rename lights inline, surround lamps with **resizable Room & Zone boxes**, recall or save **Room Scenes**, and schedule scenes in one click (**⏰ Schedule scene**).
+  > - Draw **visual dependency wires** directly between lamps (Follow/Mirror, Exclusive, Companion) and push rooms, zones, names, and **Entertainment Area 2D/3D positions** to your Hue Bridge with **1-click Sync All** or **Auto-sync**.
   >
   > **Instant Menu Bar + Resizable Window**
   > - Toggle rooms, zones, and individual lights in one click — or pop out a full 2-column window when organizing your home.
@@ -61,13 +66,14 @@
 
 ### German (`de-DE`) — Top European Hue Market
 - **Name:** `Maprisma Lights`
-- **Subtitle (30 chars max):** `Steuerung, Regeln & Musik Hue` *(29 chars)*
+- **Subtitle (30 chars max):** `Grundriss, Regeln & Musik Hue` *(29 chars)*
 - **Promotional Text:**
-  > Native macOS-Menüleisten-App für Philips Hue: Zeitpläne pro Lampe, gekoppelte Lampen-Regeln, Mac-Aufwach-Automation, Lichtthemen & Musik-Synthesizer. Einmal kaufen, kein Abo.
+  > Native macOS-App für Philips Hue: Visuelles Grundriss-Studio mit 6 Vorlagen & 12 Lampen-Icons, Raumszenen-Zeitpläne, gekoppelte Regeln, Lichtthemen & Musik-Sync. Kein Abo.
 - **Keywords (100 chars max):**
-  `philips hue,smart home,menüleiste,musik sync,licht,zeitplan,automation,lampen,szenen,farbe,ambilight`
+  `philips hue,grundriss,smart home,menüleiste,musik sync,licht,zeitplan,automation,lampen,szenen,farbe`
 - **Description (summary highlights ready for App Store Connect):**
   > Steuere deine Philips-Hue-Lampen direkt aus der macOS-Menüleiste — blitzschnell, nativ in Swift, 100 % lokal und ohne Abo.
+  > - **Visuelles Grundriss-Studio (Map-Tab):** Platziere Lampen frei auf deiner Wohnungskarte — starte mit **6 bearbeitbaren Grundriss-Vorlagen** inkl. Möbel-Symbolen oder eigenem Hintergrundbild, wähle aus **12 Lampen-Icons**, zeichne skalierbare **Raum- & Zonenboxen** mit direkten Raumszenen & **⏰ Szenen-Zeitplänen**, ziehe **Abhängigkeits-Leitungen** zwischen Lampen und synchronisiere Räume, Namen & Entertainment-Positionen per **1-Klick-Sync** mit deiner Hue Bridge.
   > - **Menüleiste + eigenes Fenster:** Räume, Zonen, Einzellampen, Favoriten, Filter sowie „Alle an / Alle aus" mit Raum-Ausnahmen.
   > - **Lichtthemen-Editor pro Lampe:** Farbtemperatur, Farben, native Hue-Effekte (Kerze, Feuer, Funkeln, Prisma) und eigene Themen speichern.
   > - **Zeitpläne pro Lampe & Raum:** Wahlweise **nativ auf der Hue Bridge** (läuft auch im Ruhezustand) oder **live auf dem Mac** — mit Uhrzeit, Sonnenauf-/-untergang, Wochentagen & sanftem Überblenden.
@@ -115,13 +121,14 @@
 
 Apple Mac App Store accepts **16:10** images at **`2880×1800`** (best) or **`2560×1600`** / **`1440×900`** / **`1280×800`**.
 
-Take these 6 clean screenshots on your Mac in **Demo Mode** (so zero private room names appear), and send them here — I will frame & composite them into localized marketing slides:
-1. **Hero Shot (`Lights` tab, detached 2-column window):** Office & Living Room glowing in rich warm/neon colors, Favorites strip visible, `All On / All Off` footer, menu bar icon visible. → Headline: *"Every Hue Light, One Click Away"*
-2. **Per-Lamp Light Theme Editor & Color Popover:** Open on a Living Room light showing the Color/Kelvin wheel, Hue Effects, and custom Light Themes. → Headline: *"Custom Themes & Native Effects per Lamp"*
-3. **Audio Light Synthesizer (`Synth` tab, Demo Beat active):** Live Bass/Mids/Treble spectrum pulsing, Color Wave / Neon palette selected. → Headline: *"Sync Your Lights to Music — No Extra App"*
-4. **Dependency & Linked-Light Rules (`Rules` tab):** Showing `"When Office Desk turns ON → Monitor Backlight ON"` + `"When Mac wakes → Office ON"`. → Headline: *"Smart Rules & Mac Wake/Sleep Triggers"*
-5. **Per-Light Schedules (`Schedules` tab):** Showing Sunrise/Sunset + Weekday Bridge schedules with `"Bridge"` / `"Mac"` badges. → Headline: *"Schedules That Run Right on Your Bridge"*
-6. **Fun Skins & Customization (`Settings` / side-by-side Skins):** Showing *Neon Synthwave*, *Cozy Cabin*, and *Retro Terminal* skins + selectable Menu Bar Icons. → Headline: *"6 Skins, 8 Menu Bar Icons, 8 Languages"*
+Take these 7 clean screenshots on your Mac in **Demo Mode** (so zero private room names appear), and send them here — I will frame & composite them into localized marketing slides:
+1. **Hero Shot #1 — Visual Floorplan Studio (`Map` tab, detached wide window):** 3-Room Apartment prototype glowing with live lamp halos, custom SF Symbol lamp icons, furniture stamps, typed Bezier dependency wires, `⏰` badges on Living Room & Office, and the 1-click **Sync All** toolbar. → Headline: *"Map Your Home. Wire Your Lights. Sync in 1 Click."*
+2. **Hero Shot #2 (`Lights` tab, detached 2-column window):** Office & Living Room glowing in rich warm/neon colors, Favorites strip visible, `All On / All Off` footer, menu bar icon visible. → Headline: *"Every Hue Light, One Click Away"*
+3. **Per-Lamp Light Theme Editor & Color Popover:** Open on a Living Room light showing the Color/Kelvin wheel, Hue Effects, and custom Light Themes. → Headline: *"Custom Themes & Native Effects per Lamp"*
+4. **Audio Light Synthesizer (`Synth` tab, Demo Beat active):** Live Bass/Mids/Treble spectrum pulsing, Color Wave / Neon palette selected. → Headline: *"Sync Your Lights to Music — No Extra App"*
+5. **Dependency & Linked-Light Rules (`Rules` tab):** Showing `"When Office Desk turns ON → Monitor Backlight ON"` + `"When Mac wakes → Office ON"`. → Headline: *"Smart Rules & Mac Wake/Sleep Triggers"*
+6. **Per-Light & Room Scene Schedules (`Schedules` tab):** Showing Sunrise/Sunset + Room Scene schedules with `"Bridge"` / `"Mac"` badges. → Headline: *"Schedules That Run Right on Your Bridge"*
+7. **Fun Skins & Customization (`Settings` / side-by-side Skins):** Showing *Neon Synthwave*, *Cozy Cabin*, and *Retro Terminal* skins + selectable Menu Bar Icons. → Headline: *"6 Skins, 8 Menu Bar Icons, 8 Languages"*
 
 ---
 

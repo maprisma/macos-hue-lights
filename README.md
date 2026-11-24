@@ -1,83 +1,27 @@
-# Maprisma Hue Lights for macOS (and COSMIC / KDE)
+# Maprisma Lights (macOS)
 
-This repository holds the **macOS port** (a native SwiftUI menu bar app) next to the original
-Linux app. Both use the same bridge helper, `scripts/hue-lights.py`, and the same 8-language
-catalogs in `translations/`.
+A native, pure-SwiftUI **Mac App Store** menu bar & window controller for **Philips Hue** (macOS 13 Ventura or newer, Apple Silicon & Intel, App Sandbox compliant, zero cloud, zero subscription).
 
-## macOS (Apple silicon, e.g. M4; macOS 13 Ventura or newer)
+## Highlights
 
-A menu bar bulb, **lit** while any light is on and **outlined** when all lights are off or no
-bridge is paired. Click it for a ~430×600 pt window that follows the system's dark/light
-appearance:
+- **Menu Bar + Detachable Resizable Window:** Instant menu bar bulb (8 selectable menu bar icons + optional lit-count badge) and a pop-out 2-column window whose size and screen position persist cleanly across restarts.
+- **Visual Floorplan & Spatial Light Studio (`Map` tab):** Place lamps freely from a collapsible, searchable **Unplaced / Placed** sidebar onto an interactive 2D home canvas with live radial color halos. Start from **6 editable house/apartment prototypes** (*Auto from Hue Bridge, Studio / Loft, 1-Bedroom Apartment, 3-Room Family Apartment, Family House + Terrace, Desk & Gaming Studio*) with draggable, 90°-rotatable architectural furniture stamps (*Door, Window, Sofa, TV, Desk, Bed, Dining, Kitchen*) — or import an optional **custom floorplan background image** (PNG/JPEG/HEIC/WebP, opacity & contain/cover controls). Pick from **12 selectable lamp icons** (SF Symbols), rename lamps inline, surround lamps with **resizable Room & Zone boxes**, recall or save **Room Scenes**, schedule scenes in 1 click (**⏰ Schedule scene**), draw **typed Bezier dependency wires** (*Follow/Mirror, Exclusive, Companion, Synth*), and push all changes + **Entertainment Area** 2D/3D positions to your Hue Bridge via **1-click Sync All** or **Auto-sync**.
+- **Lights, Rooms, Scenes & Per-Lamp Light Themes:** Live CLIP v2 Server-Sent Events (`/eventstream/clip/v2`), Favorites strip, filter pills, smart **All On / All Off** with per-room exclusions, Kelvin warmth, full color, native Hue effects (*Candle, Fire, Sparkle, Prism, Opal, Glisten*), and 8 built-in + custom per-lamp **Light Themes**.
+- **Schedules (`On Hue Bridge` or `Live on Mac`):** Per-light, per-room, and **room-scene** schedules with clock time or **Sunrise / Sunset** (± offset), weekdays, brightness, and smooth fade.
+- **Linked-Light Rules & Mac Automation:** Follow/Mirror, Exclusive, and Companion rules plus **Mac wake, sleep, and screen lock** triggers, time windows, static cycle detection, and echo suppression.
+- **Live Audio Light Synthesizer (`Synth` tab):** 3-band `vDSP` FFT (Bass, Mids, Treble) + beat detection from **System Audio** (`ScreenCaptureKit`), **Microphone** (`AVAudioEngine`), or built-in **Demo Beat**, supporting both standard Hue API and ultra-low-latency **Hue Entertainment v2 (DTLS-PSK)**.
+- **6 Fun App Skins, Global Hotkeys, Siri / Apple Shortcuts, Demo Home & 8 Languages:** *System Native, Neon Synthwave, Cozy Cabin, Retro Terminal, Disco Lava, Minimal Zen* · English, Deutsch, Français, Español, Italiano, Português, Nederlands, Polski.
+- **100% Pure Swift, Local-Only & Private:** Certificate-pinned HTTPS (SHA-256 fingerprint + CN == bridge ID) directly to your local Hue Bridge, Keychain credential storage, and zero Python/runtime dependencies inside the `.app` bundle.
 
-- **Pairing:** bridges found automatically (mDNS, then Philips' N-UPnP service, then a scan of the
-  local /24), or a bridge IP typed by hand; **Pair** starts the 35-second push-link countdown:
-  press the round button on the bridge.
-- **Rooms & zones:** one card per room/zone (and "Other lights") with an on/off switch, a
-  brightness slider while on (commands at most every 150 ms while dragging, the final value on
-  release), scene chips (the first 6 and the active one, then **+N more** / **less**), and a chevron
-  that opens the single lights (colour dot, switch, brightness slider if dimmable).
-  **All lights off** and **Refresh** sit at the bottom.
-- **Settings** (gear): interface language (System or English, Deutsch, Français, Español,
-  Italiano, Português, Nederlands, Polski; stored in `~/.config/hue-lights/settings.json`),
-  the paired bridge with **Unpair** (asks again before it acts), and **Quit** (⌘Q).
-- No Dock icon (`LSUIElement`). The app key stays in `~/.config/hue-lights/config.json` (mode 0600,
-  folder 0700) and never leaves the helper; bridge traffic is pinned HTTPS on the LAN only.
-
-### Requirements
-
-- Xcode 15+ or the Command Line Tools (`xcode-select --install`) for Swift 5.9+.
-- Python 3.8+ with only the standard library, so you never need `pip install`. The Command Line Tools'
-  `/usr/bin/python3` (3.9) works, and so does Homebrew's `python3` (`brew install python`). The app
-  looks in `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/bin`, in that order.
-
-### Build, install, run
+### Build & Tests on macOS
 
 ```sh
-./build-mac.sh            # swift build -c release → dist/Maprisma Hue Lights.app (ad-hoc signed)
-./install-mac.sh          # build + copy to /Applications (if writable) or ~/Applications
-./install-mac.sh --open   # … and launch it
-open "/Applications/Maprisma Hue Lights.app"   # or ~/Applications/…, or Spotlight
+swift test                                                     # HueCore unit tests (models, floorplan, rules, sync, 8 langs)
+./build-mac.sh && codesign --verify --deep --strict "dist/Maprisma Lights.app"
+python3 -m unittest discover -s tests -q                       # 8-language catalog & static Swift/sandbox checks
 ```
 
-`UNIVERSAL=1 ./build-mac.sh` builds an arm64 + x86_64 binary. For a dev run from the checkout,
-use `swift run MaprismaHueLights`. The app then uses `./scripts/hue-lights.py` and
-`./translations/bundled.json` because it is not inside a bundle.
-
-On first start, macOS asks for **Local Network** access. Allow it, or the bridge can't be found
-or reached. You can change it later under System Settings › Privacy & Security › Local Network.
-To start the app at login, add it under System Settings › General › Login Items.
-
-### How it fits together
-
-`Sources/HueCore` (Foundation only) holds the snapshot models, the stdin command protocol, the
-translations, the settings file, the 150 ms brightness debouncer and the **helper supervisor**.
-The supervisor starts `Contents/Resources/scripts/hue-lights.py` via `/usr/bin/env python3 -I`,
-with PATH set to `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` first. It reads JSON snapshot lines
-from stdout on a background thread and writes JSON commands to stdin. When the window opens or
-closes it sends `panel_open` / `panel_closed`, which switches the helper between polling every 2 s
-and every 20 s. If the helper exits, the supervisor starts it again after 5 s. When the app quits
-(Quit, ⌘Q, logout, SIGTERM), the supervisor closes stdin, then sends SIGTERM, then SIGKILL.
-`Sources/MaprismaHueLights` holds the SwiftUI `MenuBarExtra(.window)` app.
-
-The helper protocol is the same as on Linux: commands `panel_open`/`open`, `panel_closed`/`closed`,
-`refresh`, `discover`, `pair {ip}`, `cancel_pair`, `unpair`, `light {id, on?, bri?}`,
-`group {id, on?, bri?}`, `scene {id}`, `all_off`. Each stdout line is a snapshot:
-`phase, error, error_code, error_args, bridge, rooms[lights, scenes], light_count, on_count,
-candidates, discovering, pair_ip, pair_remaining`.
-
-### Tests on the Mac
-
-```sh
-python3 -m unittest discover -s tests -v   # helper + macOS port (no bridge, no internet needed)
-/usr/bin/python3 -m unittest tests.test_macos_hue -v   # the same with the system Python 3.9
-swift test                                 # HueCore: models, translations, debouncer, supervisor
-./build-mac.sh && codesign --verify --deep --strict "dist/Maprisma Hue Lights.app"
-```
-
-`.github/workflows/macos-ci.yml` runs all of this on `macos-latest` (Apple silicon). It checks
-the bundle structure (`Info.plist` with `LSUIElement`, the helper, the translations, the arm64
-binary, the ad-hoc signature), launches the app briefly, and uploads the zipped `.app`.
+See [MacAppStore/LAUNCH-KIT.md](MacAppStore/LAUNCH-KIT.md) and [MacAppStore/HANDOFF-MACOS.md](MacAppStore/HANDOFF-MACOS.md) for App Store Connect metadata, marketing copy, and Xcode Archive instructions.
 
 ---
 
