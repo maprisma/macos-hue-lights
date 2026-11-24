@@ -162,12 +162,12 @@ struct SettingsView: View {
                                     get: { store.appearance.backgroundStyle },
                                     set: { store.setBackgroundStyle($0) }
                                 )) {
-                                    Text(store.tr("System")).tag(BackgroundStyle.system)
-                                    Text(store.tr("Tinted")).tag(BackgroundStyle.tinted)
-                                    Text(store.tr("Dark")).tag(BackgroundStyle.dark)
-                                    Text(store.tr("Light")).tag(BackgroundStyle.light)
-                                    Text(store.tr("Warm")).tag(BackgroundStyle.warm)
-                                    Text(store.tr("Midnight")).tag(BackgroundStyle.midnight)
+                                    Text(store.tr("System")).tag(HueCore.BackgroundStyle.system)
+                                    Text(store.tr("Tinted")).tag(HueCore.BackgroundStyle.tinted)
+                                    Text(store.tr("Dark")).tag(HueCore.BackgroundStyle.dark)
+                                    Text(store.tr("Light")).tag(HueCore.BackgroundStyle.light)
+                                    Text(store.tr("Warm")).tag(HueCore.BackgroundStyle.warm)
+                                    Text(store.tr("Midnight")).tag(HueCore.BackgroundStyle.midnight)
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)

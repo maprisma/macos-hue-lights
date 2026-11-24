@@ -328,7 +328,7 @@ final class HueStore: ObservableObject {
         try? settings.setCornerStyle(style)
     }
 
-    func setBackgroundStyle(_ style: BackgroundStyle) {
+    func setBackgroundStyle(_ style: HueCore.BackgroundStyle) {
         appearance.backgroundStyle = style
         try? settings.setBackgroundStyle(style)
     }

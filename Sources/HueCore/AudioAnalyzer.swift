@@ -98,7 +98,8 @@ public struct SynthLightFrame: Equatable, Sendable {
 /// Real-time audio spectrum analyzer using Accelerate `vDSP_fft_zrip` on Apple platforms
 /// (and a pure-Swift DFT fallback on non-Apple platforms). Splits PCM float samples into
 /// Bass (20–250 Hz), Mids (250–2000 Hz), and Treble (2000–16000 Hz) plus rolling-energy beat detection.
-public final class AudioAnalyzer {
+/// Callers must serialize access on a single audio queue.
+public final class AudioAnalyzer: @unchecked Sendable {
     public let fftSize: Int
     private let log2n: UInt
     private var energyHistory: [Double] = []
