@@ -6,6 +6,46 @@ import SwiftUI
 /// Language, Bridge info + Unpair, and Quit.
 struct SettingsView: View {
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
+
+    #if DEBUG
+    private enum DebugProSimulation: Int, CaseIterable, Identifiable {
+        case live = 0
+        case simulateFree = 1
+        case simulatePro = 2
+        var id: Int { rawValue }
+    }
+
+    private var debugSimSelection: Binding<DebugProSimulation> {
+        Binding(
+            get: {
+                switch proStore.debugOverridePro {
+                case nil: return .live
+                case false: return .simulateFree
+                case true: return .simulatePro
+                }
+            },
+            set: { newValue in
+                switch newValue {
+                case .live: proStore.debugOverridePro = nil
+                case .simulateFree: proStore.debugOverridePro = false
+                case .simulatePro: proStore.debugOverridePro = true
+                }
+            }
+        )
+    }
+    #endif
+
+    private var accessBadge: (text: String, symbol: String, color: Color) {
+        switch proStore.accessMode(isDemoMode: store.isDemoMode) {
+        case .pro:
+            return (store.tr("Pro — Unlocked"), "checkmark.seal.fill", Color.green)
+        case .demo:
+            return (store.tr("Demo Mode (All Pro features preview)"), "play.circle.fill", store.skinAccentColor)
+        case .free:
+            return (store.tr("Free — Rooms & Lights"), "lightbulb.fill", Color.secondary)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -43,6 +83,77 @@ struct SettingsView: View {
                     }
 
                     SettingsSection(
+                        title: store.tr("Pro / License"),
+                        description: store.tr("One-time purchase · No subscription. Rooms, lights, scenes, schedules, and Demo Mode stay free forever.")
+                    ) {
+                        let badge = accessBadge
+                        HStack(spacing: 7) {
+                            Image(systemName: badge.symbol)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(badge.color)
+                            Text(badge.text)
+                                .font(store.scaledFont(12, weight: .semibold))
+                                .foregroundStyle(badge.color == .secondary ? Color.primary : badge.color)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule().fill(badge.color.opacity(0.14))
+                        )
+
+                        HStack(spacing: 8) {
+                            if !proStore.effectiveProUnlocked {
+                                Button {
+                                    store.showProUpgradeSheet = true
+                                } label: {
+                                    Label(store.tr("Unlock Pro…"), systemImage: "crown.fill")
+                                        .font(store.scaledFont(12, weight: .semibold))
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                            }
+
+                            Button {
+                                Task { await proStore.restorePurchases() }
+                            } label: {
+                                Text(store.tr("Restore Purchases"))
+                                    .font(store.scaledFont(12))
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(proStore.isPurchasing || proStore.isLoading)
+                        }
+
+                        if let status = proStore.statusMessage, !status.isEmpty {
+                            Text(status)
+                                .font(store.scaledFont(11, weight: .medium))
+                                .foregroundStyle(proStore.effectiveProUnlocked ? Color.green : Color.secondary)
+                        }
+                        if let error = proStore.errorMessage, !error.isEmpty {
+                            Text(error)
+                                .font(store.scaledFont(11))
+                                .foregroundStyle(Color.orange)
+                        }
+
+                        #if DEBUG
+                        Divider()
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(store.tr("Debug License Simulation"))
+                                .font(store.scaledFont(11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Picker(store.tr("Debug License Simulation"), selection: debugSimSelection) {
+                                Text(store.tr("StoreKit Live")).tag(DebugProSimulation.live)
+                                Text(store.tr("Simulate Free")).tag(DebugProSimulation.simulateFree)
+                                Text(store.tr("Simulate Pro")).tag(DebugProSimulation.simulatePro)
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .controlSize(.small)
+                        }
+                        #endif
+                    }
+
+                    SettingsSection(
                         title: store.tr("App Skin"),
                         description: skinDescription(store.skin)
                     ) {
@@ -55,9 +166,14 @@ struct SettingsView: View {
                         ) {
                             ForEach(AppSkin.allCases) { skin in
                                 let selected = store.skin == skin
+                                let skinLocked = !proStore.isSkinUnlocked(skin, isDemoMode: store.isDemoMode)
                                 Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        store.setSkin(skin)
+                                    if skinLocked {
+                                        store.showProUpgradeSheet = true
+                                    } else {
+                                        withAnimation(.easeInOut(duration: 0.15)) {
+                                            store.setSkin(skin)
+                                        }
                                     }
                                 } label: {
                                     HStack(spacing: 8) {
@@ -78,8 +194,14 @@ struct SettingsView: View {
                                             .font(store.scaledFont(11.5, weight: selected ? .semibold : .regular))
                                             .lineLimit(1)
                                         Spacer(minLength: 0)
+                                        if skinLocked {
+                                            Image(systemName: "lock.fill")
+                                                .font(.system(size: 9.5, weight: .semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                     .padding(7)
+                                    .opacity(skinLocked ? 0.78 : 1.0)
                                     .background(
                                         RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
                                             .fill(selected ? store.skinAccentColor.opacity(0.18) : Color.primary.opacity(0.05))
@@ -245,14 +367,28 @@ struct SettingsView: View {
                         title: store.tr("Ask AI"),
                         description: store.tr("Optional local-first assistant to switch lights, create rules, and schedule in plain language. Off by default — turn on anytime.")
                     ) {
+                        let askAILocked = !proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode)
                         VStack(alignment: .leading, spacing: 10) {
                             Toggle(isOn: Binding(
-                                get: { store.askAIEnabled },
-                                set: { store.setAskAIEnabled($0) }
+                                get: { store.askAIEnabled && !askAILocked },
+                                set: { enabled in
+                                    if enabled && askAILocked {
+                                        store.showProUpgradeSheet = true
+                                    } else {
+                                        store.setAskAIEnabled(enabled)
+                                    }
+                                }
                             )) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(store.tr("Enable Ask AI"))
-                                        .font(store.scaledFont(12.5, weight: .medium))
+                                    HStack(spacing: 6) {
+                                        Text(store.tr("Enable Ask AI"))
+                                            .font(store.scaledFont(12.5, weight: .medium))
+                                        if askAILocked {
+                                            Image(systemName: "lock.fill")
+                                                .font(.system(size: 9.5, weight: .semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
                                     Text(store.tr("Shows the ✨ Ask AI button (⌘K) in the header. When off, Ask AI is completely hidden and inactive."))
                                         .font(store.scaledFont(11))
                                         .foregroundStyle(.secondary)
@@ -261,7 +397,7 @@ struct SettingsView: View {
                             .toggleStyle(.switch)
                             .controlSize(.small)
 
-                            if store.askAIEnabled {
+                            if store.askAIEnabled && !askAILocked {
                                 Divider()
 
                                 settingRow(

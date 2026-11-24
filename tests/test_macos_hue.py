@@ -455,11 +455,30 @@ class SwiftAppTests(unittest.TestCase):
         ):
             self.assertIn(needle, floorplan)
         models = read("Sources", "HueCore", "Models.swift")
-        for needle in ("HueMotionArea", "HueSensor", "motionAware", "motionActive", "BSB003"):
+        for needle in (
+            "HueMotionArea",
+            "HueSensor",
+            "motionAware",
+            "motionActive",
+            "BSB003",
+            "motionAreaCandidates",
+            "motion_area_candidates",
+            "decodeIfPresent(Int.self, forKey: .motionAreaCandidates)",
+        ):
             self.assertIn(needle, models)
         help_view = read("Sources", "MaprismaHueLights", "HelpView.swift")
         for needle in (
             "struct HelpView",
+            "enum HelpFeature",
+            "selectedFeature",
+            "onTryFeature",
+            "drawPreview",
+            "height: 200",
+            "All features",
+            "Tap for step-by-step guide",
+            "How to do it",
+            "Quick Tip",
+            "Try it now",
             "TimelineView",
             "MotionAware",
             "Canvas",
@@ -470,6 +489,34 @@ class SwiftAppTests(unittest.TestCase):
             "drawMCPPreview",
         ):
             self.assertIn(needle, help_view)
+        rooms_view = read("Sources", "MaprismaHueLights", "RoomsView.swift")
+        for needle in (
+            "struct MotionAwareSetupHintBanner",
+            "shouldShowMotionAwareSetupHint",
+            "Bridge Pro MotionAware™ Ready",
+            "1. Open the Philips Hue mobile app → Settings → MotionAware",
+            "ellipsis.circle",
+            "Brightness…",
+            "Color & Warmth…",
+            "Rename…",
+            "Lamp icon…",
+            "Wire rule on Map",
+            "LampBrightnessSheet",
+            "LampRenameSheet",
+            "LampIconPickerSheet",
+            "store.lampIcon(for: light)",
+            "openMapInRulesMode",
+        ):
+            self.assertIn(needle, rooms_view)
+        hue_store = read("Sources", "MaprismaHueLights", "HueStore.swift")
+        for needle in (
+            "shouldShowMotionAwareSetupHint",
+            "motionAwareEligibleRooms",
+            "motionAwareHintDismissed",
+            "openMapInRulesMode",
+            "func lampIcon(for light: HueLight)",
+        ):
+            self.assertIn(needle, hue_store)
         settings_store = read("Sources", "HueCore", "SettingsStore.swift")
         for needle in (
             "public var askAIEnabled: Bool = false",
@@ -512,6 +559,8 @@ class SwiftAppTests(unittest.TestCase):
         content_view = read("Sources", "MaprismaHueLights", "ContentView.swift")
         self.assertIn("if store.askAIEnabled", content_view)
         self.assertIn('.keyboardShortcut("k", modifiers: .command)', content_view)
+        self.assertIn("HelpView(onTryFeature:", content_view)
+        self.assertIn("handleTryHelpFeature", content_view)
         settings_view = read("Sources", "MaprismaHueLights", "SettingsView.swift")
         self.assertIn("Enable Ask AI", settings_view)
         self.assertIn("if store.askAIEnabled", settings_view)
@@ -531,6 +580,8 @@ class SwiftAppTests(unittest.TestCase):
             "FloorplanSensorNodeView",
             "dot.radiowaves.left.and.right",
             "syncAllFloorplanToBridge",
+            "MotionAwareSetupHintBanner",
+            "consumePendingMapNavigation",
         ):
             self.assertIn(needle, map_view)
         # SwiftUI files must never reference unqualified BackgroundStyle (ambiguous with SwiftUI.BackgroundStyle)
@@ -541,6 +592,7 @@ class SwiftAppTests(unittest.TestCase):
             # Ensure no macOS 14+ only SwiftUI APIs leak into macOS 13 target
             self.assertNotIn("@Observable", text, name)
             self.assertNotIn(".contentMargins(", text, name)
+            self.assertNotIn(".symbolEffect(", text, name)
 
     def test_swift_delimiters_balanced(self):
         """Catch stray braces/brackets/parens in all Swift sources & tests before macOS CI builds."""
@@ -644,6 +696,159 @@ class SwiftAppTests(unittest.TestCase):
                 for name in files:
                     if name.endswith(".swift"):
                         check_file(os.path.join(base, name))
+
+    def test_motion_aware_setup_hint_contract(self):
+        models = read("Sources", "HueCore", "Models.swift")
+        native = read("Sources", "HueCore", "NativeHueBridgeClient.swift")
+        demo = read("Sources", "HueCore", "DemoBridgeClient.swift")
+        store = read("Sources", "MaprismaHueLights", "HueStore.swift")
+        rooms = read("Sources", "MaprismaHueLights", "RoomsView.swift")
+        map_view = read("Sources", "MaprismaHueLights", "MapView.swift")
+
+        self.assertIn("public var motionAreaCandidates: Int = 0", models)
+        self.assertIn("decodeIfPresent(Int.self, forKey: .motionAreaCandidates)", models)
+        self.assertIn("motionAreaCandidates = model.motionAreaCandidates", native)
+        self.assertIn("motionAreaCandidates: 3", demo)
+        self.assertIn("snapshot.bridge?.isPro == true && snapshot.motionAreas.isEmpty && !motionAwareHintDismissed", store)
+        self.assertIn("$0.kind == \"room\" && $0.lights.count >= 3", store)
+        self.assertIn("MotionAwareSetupHintBanner()", rooms)
+        self.assertIn("MotionAwareSetupHintBanner()", map_view)
+        self.assertIn("Bridge Pro MotionAware™ Ready", rooms)
+
+    def test_interactive_help_view_and_steps_contract(self):
+        help_view = read("Sources", "MaprismaHueLights", "HelpView.swift")
+        content = read("Sources", "MaprismaHueLights", "ContentView.swift")
+
+        self.assertIn("enum HelpFeature: Int, CaseIterable, Identifiable", help_view)
+        self.assertIn("@State private var selectedFeature: HelpFeature? = nil", help_view)
+        self.assertIn("var onTryFeature: ((HelpFeature) -> Void)? = nil", help_view)
+        self.assertIn(".frame(height: 200)", help_view)
+        self.assertIn("private func drawPreview(", help_view)
+        self.assertIn("private func steps(for feature: HelpFeature) -> [String]", help_view)
+        self.assertIn("private func tip(for feature: HelpFeature) -> String", help_view)
+        self.assertIn(".keyboardShortcut(.cancelAction)", help_view)
+        self.assertIn("HelpView(onTryFeature:", content)
+        for case_name in ("lights", "floorplan", "rules", "motionAware", "schedules", "synth", "skins", "askAI", "mcpServer"):
+            self.assertIn(f"case .{case_name}:", help_view)
+
+    def test_rooms_view_unified_light_submenu_contract(self):
+        rooms = read("Sources", "MaprismaHueLights", "RoomsView.swift")
+        map_view = read("Sources", "MaprismaHueLights", "MapView.swift")
+        store = read("Sources", "MaprismaHueLights", "HueStore.swift")
+
+        self.assertIn('Image(systemName: "ellipsis.circle")', rooms)
+        self.assertIn("chosenIcon.sfSymbol(lit: light.on)", rooms)
+        for action in ("Brightness…", "Color & Warmth…", "Rename…", "Lamp icon…", "Wire rule on Map", "Pin to Favorites", "Remove from Favorites"):
+            self.assertIn(action, rooms)
+        self.assertIn("struct LampBrightnessSheet: View", map_view)
+        self.assertIn("struct LampRenameSheet: View", map_view)
+        self.assertIn("struct LampIconPickerSheet: View", map_view)
+        self.assertIn("func openMapInRulesMode(wiringLightID: String? = nil)", store)
+
+    def test_pro_access_storekit2_and_paywall_contract(self):
+        pro_access = read("Sources", "HueCore", "ProAccess.swift")
+        for needle in (
+            "public enum AppAccessMode: String, Codable, Sendable, Equatable",
+            "public enum ProFeature: String, CaseIterable, Identifiable, Sendable",
+            "case floorplan",
+            "case rules",
+            "case motionAware",
+            "case audioSynth",
+            "case skins",
+            "case askAI",
+            "case mcp",
+            "public struct ProAccessPolicy: Sendable",
+            'public static let proProductID = "com.maprisma.huelights.pro"',
+            "public static func mode(isProUnlocked: Bool, isDemoMode: Bool) -> AppAccessMode",
+            "public static func isUnlocked(_ feature: ProFeature, isProUnlocked: Bool, isDemoMode: Bool) -> Bool",
+            "public static func isSkinFree(_ skin: String) -> Bool",
+        ):
+            self.assertIn(needle, pro_access)
+
+        pro_manager = read("Sources", "MaprismaHueLights", "ProStoreManager.swift")
+        for needle in (
+            "import StoreKit",
+            "@MainActor",
+            "final class ProStoreManager: ObservableObject",
+            "Transaction.currentEntitlements",
+            "Transaction.updates",
+            "AppStore.sync()",
+            "effectiveProUnlocked",
+            "debugOverridePro",
+            "formattedPrice",
+            "purchasePro()",
+            "restorePurchases()",
+            "ProAccessPolicy.proProductID",
+            "revocationDate == nil",
+        ):
+            self.assertIn(needle, pro_manager)
+        self.assertNotIn("@Observable", pro_manager)
+
+        pro_view = read("Sources", "MaprismaHueLights", "ProUpgradeView.swift")
+        for needle in (
+            "struct ProUpgradeView: View",
+            "struct ProLockedOverlay: View",
+            "struct ProFeatureGateBanner: View",
+            "Maprisma Hue Lights Pro",
+            "One-time purchase · No subscription",
+            "Restore Purchases",
+            "Try free in Demo Mode",
+            "Try in Demo Mode",
+            "Optional local-first Ask AI & local MCP server",
+        ):
+            self.assertIn(needle, pro_view)
+
+        app = read("Sources", "MaprismaHueLights", "MaprismaHueLightsApp.swift")
+        self.assertIn("@StateObject private var proStore = ProStoreManager()", app)
+        self.assertIn(".environmentObject(proStore)", app)
+
+        content = read("Sources", "MaprismaHueLights", "ContentView.swift")
+        self.assertIn("ProUpgradeView()", content)
+        self.assertIn("proStore.start()", content)
+        self.assertIn("Connect Bridge", content)
+
+        settings_view = read("Sources", "MaprismaHueLights", "SettingsView.swift")
+        for needle in (
+            "Pro / License",
+            "Pro — Unlocked",
+            "Demo Mode (All Pro features preview)",
+            "Free — Rooms & Lights",
+            "Unlock Pro…",
+            "Restore Purchases",
+            "StoreKit Live",
+            "Simulate Free",
+            "Simulate Pro",
+            "isSkinUnlocked",
+        ):
+            self.assertIn(needle, settings_view)
+
+        for view_name, feature_token in (
+            ("MapView.swift", ".floorplan"),
+            ("RulesView.swift", ".rules"),
+            ("SynthView.swift", ".audioSynth"),
+        ):
+            view_src = read("Sources", "MaprismaHueLights", view_name)
+            self.assertIn("ProLockedOverlay(", view_src, view_name)
+            self.assertIn(feature_token, view_src, view_name)
+
+        rooms_view = read("Sources", "MaprismaHueLights", "RoomsView.swift")
+        self.assertIn("proStore.isUnlocked(.motionAware", rooms_view)
+        self.assertIn("proStore.isUnlocked(.rules", rooms_view)
+
+        storekit_raw = read("MacAppStore", "MaprismaHueLights.storekit")
+        storekit = json.loads(storekit_raw)
+        self.assertIn("products", storekit)
+        self.assertEqual(len(storekit["products"]), 1)
+        prod = storekit["products"][0]
+        self.assertEqual(prod["productID"], "com.maprisma.huelights.pro")
+        self.assertEqual(prod["type"], "NonConsumable")
+        self.assertEqual(prod["displayPrice"], "9.99")
+        locales = {loc["locale"] for loc in prod["localizations"]}
+        self.assertTrue({"en_US", "de_DE"}.issubset(locales))
+
+        launch_kit = read("MacAppStore", "LAUNCH-KIT.md")
+        self.assertIn("com.maprisma.huelights.pro", launch_kit)
+        self.assertIn("MaprismaHueLights.storekit", launch_kit)
 
     def test_build_and_install_scripts(self):
         for name in ("build-mac.sh", "install-mac.sh"):

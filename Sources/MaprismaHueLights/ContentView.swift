@@ -7,6 +7,7 @@ struct ContentView: View {
     enum DisplayMode { case popover, detached }
 
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
     var mode: DisplayMode = .popover
 
     var body: some View {
@@ -26,7 +27,9 @@ struct ContentView: View {
                 case .settings:
                     SettingsView()
                 case .help:
-                    HelpView()
+                    HelpView(onTryFeature: { feature in
+                        handleTryHelpFeature(feature)
+                    })
                 case .main:
                     MainView(mode: mode)
                 }
@@ -45,13 +48,21 @@ struct ContentView: View {
                 .preferredColorScheme(store.preferredColorScheme)
         }
         .sheet(isPresented: $store.showAskAISheet) {
-            if store.askAIEnabled {
+            if store.askAIEnabled && proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode) {
                 AskAIView()
                     .environmentObject(store)
                     .tint(store.skinAccentColor)
                     .fontDesign(store.fontDesign)
                     .preferredColorScheme(store.preferredColorScheme)
             }
+        }
+        .sheet(isPresented: $store.showProUpgradeSheet) {
+            ProUpgradeView()
+                .environmentObject(store)
+                .environmentObject(proStore)
+                .tint(store.skinAccentColor)
+                .fontDesign(store.fontDesign)
+                .preferredColorScheme(store.preferredColorScheme)
         }
         .background(
             WindowObserver(
@@ -62,8 +73,53 @@ struct ContentView: View {
                 onFrameChange: mode == .detached ? { frame in store.saveWindowFrame(frame) } : nil
             )
         )
-        .onAppear { store.setPanel(open: true) }
+        .onAppear {
+            store.setPanel(open: true)
+            proStore.start()
+            store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
+        }
         .onDisappear { store.setPanel(open: false) }
+        .onChange(of: proStore.effectiveProUnlocked) { unlocked in
+            store.enforceFreeAccessFallbacks(isProUnlocked: unlocked)
+        }
+        .onChange(of: store.snapshot.isDemo) { _ in
+            store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
+        }
+    }
+
+    private func handleTryHelpFeature(_ feature: HelpFeature) {
+        switch feature {
+        case .lights:
+            store.page = .main
+            store.tab = .lights
+        case .floorplan:
+            store.page = .main
+            store.tab = .map
+            store.pendingMapMode = "map"
+        case .rules:
+            store.openMapInRulesMode()
+        case .motionAware:
+            store.page = .main
+            store.tab = .map
+            store.pendingMapMode = "map"
+        case .schedules:
+            store.page = .main
+            store.tab = .schedules
+        case .synth:
+            store.page = .main
+            store.tab = .synth
+        case .skins:
+            store.page = .settings
+        case .askAI:
+            if store.askAIEnabled && proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode) {
+                store.page = .main
+                store.showAskAISheet = true
+            } else {
+                store.page = .settings
+            }
+        case .mcpServer:
+            store.page = .settings
+        }
     }
 }
 
@@ -124,6 +180,7 @@ private struct WindowSizeModifier: ViewModifier {
 
 struct HeaderView: View {
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
     @Environment(\.openWindow) private var openWindow
     let mode: ContentView.DisplayMode
 
@@ -143,12 +200,35 @@ struct HeaderView: View {
                         .font(store.scaledFont(13.5, weight: .semibold))
                         .lineLimit(1)
                     if s.isDemo {
-                        Text(store.tr("Demo"))
+                        Menu {
+                            Button {
+                                store.exitDemoMode()
+                            } label: {
+                                Label(store.tr("Connect Bridge"), systemImage: "wifi.router")
+                            }
+                            if !proStore.effectiveProUnlocked {
+                                Button {
+                                    store.showProUpgradeSheet = true
+                                } label: {
+                                    Label(store.tr("Unlock Pro"), systemImage: "crown.fill")
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Text(store.tr("Demo"))
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 7.5, weight: .bold))
+                            }
                             .font(store.scaledFont(10, weight: .semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .foregroundStyle(store.skinAccentColor)
                             .background(Capsule().fill(store.skinAccentColor.opacity(0.15)))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help(store.tr("Demo Mode (All Pro features preview)"))
                     }
                 }
                 Text(s.isPaired ? (s.bridge?.text ?? "Hue Bridge") : store.tr("No bridge paired"))
@@ -177,7 +257,7 @@ struct HeaderView: View {
                 .buttonStyle(.borderless)
                 .help(store.tr("Open in window"))
             }
-            if store.askAIEnabled {
+            if store.askAIEnabled && proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode) {
                 Button {
                     store.showAskAISheet = true
                 } label: {
@@ -219,16 +299,22 @@ struct HeaderView: View {
 
 struct TabBarView: View {
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
 
     var body: some View {
+        let mapLocked = !proStore.isUnlocked(.floorplan, isDemoMode: store.isDemoMode)
+        let rulesLocked = !proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode)
+        let synthLocked = !proStore.isUnlocked(.audioSynth, isDemoMode: store.isDemoMode)
         HStack(spacing: 4) {
-            tabButton(.lights, title: store.tr("Lights"), symbol: "lightbulb", badge: nil, activeDot: false)
-            tabButton(.map, title: store.tr("Map"), symbol: "map", badge: nil, activeDot: store.pendingFloorplanSyncPlan.hasRoomOrMetaChanges)
+            tabButton(.lights, title: store.tr("Lights"), symbol: "lightbulb", badge: nil, activeDot: false, locked: false)
+            tabButton(.map, title: store.tr("Map"), symbol: "map", badge: nil,
+                      activeDot: !mapLocked && store.pendingFloorplanSyncPlan.hasRoomOrMetaChanges, locked: mapLocked)
             tabButton(.schedules, title: store.tr("Schedules"), symbol: "clock",
-                      badge: store.allSchedules.isEmpty ? nil : store.allSchedules.count, activeDot: false)
+                      badge: store.allSchedules.isEmpty ? nil : store.allSchedules.count, activeDot: false, locked: false)
             tabButton(.rules, title: store.tr("Rules"), symbol: "link",
-                      badge: store.rules.isEmpty ? nil : store.rules.count, activeDot: false)
-            tabButton(.synth, title: store.tr("Synth"), symbol: "waveform", badge: nil, activeDot: store.synthRunning)
+                      badge: (rulesLocked || store.rules.isEmpty) ? nil : store.rules.count, activeDot: false, locked: rulesLocked)
+            tabButton(.synth, title: store.tr("Synth"), symbol: "waveform", badge: nil,
+                      activeDot: !synthLocked && store.synthRunning, locked: synthLocked)
         }
         .padding(3)
         .background(
@@ -241,7 +327,7 @@ struct TabBarView: View {
         )
     }
 
-    private func tabButton(_ tab: HueStore.MainTab, title: String, symbol: String, badge: Int?, activeDot: Bool) -> some View {
+    private func tabButton(_ tab: HueStore.MainTab, title: String, symbol: String, badge: Int?, activeDot: Bool, locked: Bool) -> some View {
         let selected = store.tab == tab
         return Button {
             withAnimation(.easeInOut(duration: 0.15)) { store.tab = tab }
@@ -252,7 +338,11 @@ struct TabBarView: View {
                 Text(title)
                     .font(store.scaledFont(11.5, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
-                if let badge = badge {
+                if locked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
+                } else if let badge = badge {
                     Text("\(badge)")
                         .font(store.scaledFont(9.5, weight: .medium).monospacedDigit())
                         .padding(.horizontal, 4.5)

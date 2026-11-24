@@ -832,7 +832,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
             error: "",
             errorCode: "",
             errorArgs: [],
-            bridge: BridgeInfo(ip: "Demo Mode", name: "Demo Hue Bridge Pro", model: "BSB003", modelID: "BSB003", isPro: true),
+            bridge: BridgeInfo(ip: "Demo Mode", name: "Demo Hue Bridge Pro", model: "BSB003", modelID: "BSB003", isPro: true, motionAreaCandidates: 3),
             rooms: builtRooms,
             lightCount: totalLights,
             onCount: totalOn,

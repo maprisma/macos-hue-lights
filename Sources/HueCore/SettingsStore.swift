@@ -478,6 +478,22 @@ public struct SettingsStore {
         )
     }
 
+    // MARK: - Non-Authoritative Pro Cache (Headless CLI Hint Only)
+
+    /// Informational cache written after StoreKit 2 verifies `Transaction.currentEntitlements`.
+    /// IMPORTANT: GUI builds must NEVER trust this flag for unlocking Pro features — always verify
+    /// directly via StoreKit 2 (`Transaction.currentEntitlements`). This exists solely as a
+    /// non-crashing hint for headless CLI tools (`--mcp`).
+    public func lastVerifiedPro() -> Bool {
+        (read()["lastVerifiedPro"] as? Bool) ?? false
+    }
+
+    public func setLastVerifiedPro(_ value: Bool) throws {
+        var settings = read()
+        settings["lastVerifiedPro"] = value
+        try write(settings)
+    }
+
     // MARK: - Detached Window Frame (size & screen position)
 
     public func windowFrame() -> SavedWindowFrame? {

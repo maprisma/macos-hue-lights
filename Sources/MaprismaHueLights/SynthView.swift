@@ -6,12 +6,32 @@ import SwiftUI
 /// modes, palettes, sensitivity/smoothness sliders, and per-lamp frequency band mapping.
 struct SynthView: View {
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
 
     private var targetLights: [HueLight] {
         store.synthTargetLights
     }
 
     var body: some View {
+        if !proStore.isUnlocked(.audioSynth, isDemoMode: store.isDemoMode) {
+            ProLockedOverlay(
+                feature: .audioSynth,
+                symbol: "waveform",
+                accentHex: "#f97316",
+                title: store.tr("Audio Light Synth"),
+                description: store.tr("Sync your lights in real time to music, movies, or microphone audio with 3-band Bass, Mids & Treble analysis and 25 Hz Entertainment streaming."),
+                highlights: [
+                    store.tr("Real-time System Audio & Microphone capture (in-memory only)"),
+                    store.tr("Ultra-smooth 25 Hz Hue Entertainment v2 & Standard Sync"),
+                    store.tr("Per-lamp Bass, Mids & Treble band assignments"),
+                ]
+            )
+        } else {
+            synthBody
+        }
+    }
+
+    private var synthBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 headerCard

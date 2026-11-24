@@ -1,4 +1,4 @@
-# Maprisma Lights — Mac App Store Launch Kit ($4.99 / €4.99)
+# Maprisma Lights — Mac App Store Launch Kit (Free + One-Time Pro Unlock)
 
 ![Maprisma Lights macOS App Icon](AppIcon-1024.png)
 
@@ -11,10 +11,36 @@
 - **App Name:** **`Maprisma Lights`** *(15 chars — clean, DPMA/EUIPO & App Store clear, no "Hue" in brand title)*
 - **Bundle ID:** **`com.maprisma.lights`**
 - **Primary Category:** Utilities · **Secondary Category:** Lifestyle
-- **Price Tier:** **$4.99 / €4.99** one-time purchase *(optional $2.99 launch intro)*
+- **Pricing Model (Option A — Zero Subscription):**
+  - **Base App Download:** **Free**
+  - **Non-Consumable IAP Product ID:** **`com.maprisma.huelights.pro`** (`Maprisma Hue Lights Pro`, Family Sharing enabled)
+  - **Price Tier:** **$7.99 / €7.99** launch offer → **$9.99 / €9.99** standard one-time purchase *(NO subscription)*
 - **Age Rating:** 4+ (no objectionable content)
 - **App Privacy Nutrition Label:** **Data Not Collected** (all bridge traffic stays on the local LAN; audio for the Light Synthesizer is analyzed strictly in memory and never recorded or transmitted).
 - **Export Compliance (`ITSAppUsesNonExemptEncryption`):** `NO` (uses only standard Apple OS TLS/HTTPS on the local network).
+
+### Free vs. Demo vs. Pro Feature Matrix
+
+| Feature | Free (Real Hue Bridge) | Demo Mode (Simulated Home) | Pro (One-Time IAP `com.maprisma.huelights.pro`) |
+| :--- | :---: | :---: | :---: |
+| Menu bar popover & resizable desktop window | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Rooms, Zones, Lights (power, brightness, color/warmth, scenes, rename, favorites) | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Bridge discovery, pairing & pinned HTTPS | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Animated Help & Guide (`?`), Native skin, 8 languages | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Schedules (Bridge & Mac) | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Visual Floorplan Studio & 12 custom lamp icons (`Map` tab) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
+| Visual Rules & physical Hue Sensors (`Rules` tab) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
+| Hue Bridge Pro MotionAware™ controls | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
+| Audio Reactive Light Synth (`Synth` tab) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
+| All 6 custom Skins (5 custom + Native) | Native free / 5 🔒 | ✅ Unlocked | ✅ Unlocked |
+| Optional local-first Ask AI (default OFF) & local MCP server (`--mcp`) | 🔒 Preview in Demo | ✅ Unlocked (`--demo --mcp`) | ✅ Unlocked |
+
+### Local StoreKit 2 Testing in Xcode
+1. Open the generated Xcode project (`MacAppStore/project.yml` → `xcodegen generate`).
+2. Add `MacAppStore/MaprismaHueLights.storekit` to the project (if not already referenced).
+3. Go to **Product → Scheme → Edit Scheme… → Run → Options → StoreKit Configuration** and select **`MaprismaHueLights.storekit`**.
+4. Run the app in Debug mode to test real StoreKit 2 **Purchase**, **Restore Purchases**, **Transaction.updates**, and **Revocation** locally without an App Store Connect sandbox account.
+5. In Debug builds, **Settings → Pro / License → Debug License Simulation** also lets you switch instantly between **StoreKit Live**, **Simulate Free**, and **Simulate Pro** (stripped out completely in Release builds).
 
 ### English (`en-US` / `en-GB`)
 - **Name (30 chars max):** `Maprisma Lights` *(15 chars)*

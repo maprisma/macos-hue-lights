@@ -85,6 +85,12 @@ struct RoomsView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
 
+                if store.shouldShowMotionAwareSetupHint {
+                    MotionAwareSetupHintBanner()
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                }
+
                 GeometryReader { geo in
                     let twoColumns = geo.size.width >= 680
                     let shown = filteredRooms
@@ -255,6 +261,7 @@ private struct FilterBar: View {
 
 struct RoomCard: View {
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
     let room: HueRoom
 
     private var tint: Color? { room.on ? Color(hex: room.color) : nil }
@@ -311,22 +318,32 @@ struct RoomCard: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 if let area = motionArea, area.enabled {
-                                    HStack(spacing: 3) {
-                                        Image(systemName: "dot.radiowaves.left.and.right")
-                                            .font(.system(size: 8.5, weight: .semibold))
-                                        if hasPresence {
-                                            Text(store.tr("Presence"))
-                                                .font(store.scaledFont(9, weight: .semibold))
+                                    let maUnlocked = proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode)
+                                    Button {
+                                        if maUnlocked {
+                                            store.updateMotionArea(area, enabled: !area.enabled)
+                                        } else {
+                                            store.showProUpgradeSheet = true
                                         }
-                                    }
-                                    .foregroundStyle(hasPresence ? Color(hex: "#10b981") : Color(hex: "#06b6d4"))
-                                    .padding(.horizontal, hasPresence ? 5 : 3)
-                                    .padding(.vertical, 1.5)
-                                    .background(
-                                        Capsule().fill(
-                                            (hasPresence ? Color(hex: "#10b981") : Color(hex: "#06b6d4")).opacity(hasPresence ? 0.16 : 0.10)
+                                    } label: {
+                                        HStack(spacing: 3) {
+                                            Image(systemName: "dot.radiowaves.left.and.right")
+                                                .font(.system(size: 8.5, weight: .semibold))
+                                            if hasPresence {
+                                                Text(store.tr("Presence"))
+                                                    .font(store.scaledFont(9, weight: .semibold))
+                                            }
+                                        }
+                                        .foregroundStyle(hasPresence ? Color(hex: "#10b981") : Color(hex: "#06b6d4"))
+                                        .padding(.horizontal, hasPresence ? 5 : 3)
+                                        .padding(.vertical, 1.5)
+                                        .background(
+                                            Capsule().fill(
+                                                (hasPresence ? Color(hex: "#10b981") : Color(hex: "#06b6d4")).opacity(hasPresence ? 0.16 : 0.10)
+                                            )
                                         )
-                                    )
+                                    }
+                                    .buttonStyle(.plain)
                                     .help(hasPresence ? store.tr("MotionAware presence detected") : store.tr("MotionAware active"))
                                 }
                             }
@@ -355,13 +372,27 @@ struct RoomCard: View {
                             store.toggleExcludedFromAllOn(room.id)
                         }
                     }
+                    if let area = motionArea {
+                        Divider()
+                        Button(area.enabled ? store.tr("Disable MotionAware™") : store.tr("Enable MotionAware™")) {
+                            if proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode) {
+                                store.updateMotionArea(area, enabled: !area.enabled)
+                            } else {
+                                store.showProUpgradeSheet = true
+                            }
+                        }
+                    }
                     if !room.hueID.isEmpty {
                         Divider()
                         Button(store.tr("Schedule this room …")) {
                             store.openScheduleFor(kind: "room", id: room.id)
                         }
                         Button(store.tr("Link with another light …")) {
-                            store.openRuleFor(kind: "room", id: room.id)
+                            if proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode) {
+                                store.openRuleFor(kind: "room", id: room.id)
+                            } else {
+                                store.showProUpgradeSheet = true
+                            }
                         }
                     }
                 } label: {
@@ -464,10 +495,92 @@ struct BrightnessSlider: View {
     }
 }
 
+/// Compact, session-dismissible setup hint shown ONLY on Philips Hue Bridge Pro when no
+/// MotionAware™ area has been calibrated yet. Stays 100% hidden on Bridge v2 or once an area exists.
+struct MotionAwareSetupHintBanner: View {
+    @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
+
+    var body: some View {
+        if store.shouldShowMotionAwareSetupHint {
+            let eligible = store.motionAwareEligibleRooms
+            let eligibleNames = eligible.map { store.l10n.roomName($0) }.joined(separator: ", ")
+            let accent = Color(hex: "#06b6d4")
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 7) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                    Text(store.tr("Bridge Pro MotionAware™ Ready"))
+                        .font(store.scaledFont(12, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            store.dismissMotionAwareHint()
+                        }
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .help(store.tr("Dismiss"))
+                }
+
+                if !eligibleNames.isEmpty {
+                    Text(store.trf("Eligible rooms (3+ lights): {0}", [eligibleNames]))
+                        .font(store.scaledFont(10.5, weight: .medium))
+                        .foregroundStyle(accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(store.tr("1. Open the Philips Hue mobile app → Settings → MotionAware"))
+                    Text(store.tr("2. Pick 3+ lights in a room & run the 30-second calibration once"))
+                    Text(store.tr("3. Return here — live radar badges, sensitivity & visual rules appear automatically!"))
+                }
+                .font(store.scaledFont(10.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                if !proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode) {
+                    HStack(spacing: 8) {
+                        Button {
+                            store.showProUpgradeSheet = true
+                        } label: {
+                            Label(store.tr("Unlock Pro"), systemImage: "crown.fill")
+                                .font(store.scaledFont(10.5, weight: .semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.mini)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                    .fill(accent.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                    .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+            )
+        }
+    }
+}
+
 struct LightRow: View {
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
     let light: HueLight
     @State private var showColorPopover = false
+    @State private var activeLampDialog: LampDialogSheet? = nil
 
     private var canPickColor: Bool {
         light.supportsColor || light.supportsCT || !light.availableEffects.isEmpty
@@ -476,17 +589,24 @@ struct LightRow: View {
     var body: some View {
         let favKey = HueStore.favoriteKey(light: light)
         let isFav = store.isFavorite(favKey)
+        let chosenIcon = store.lampIcon(for: light)
 
         HStack(spacing: 8) {
             Button {
-                if canPickColor { showColorPopover = true }
+                showColorPopover = true
             } label: {
-                Circle()
-                    .fill(light.on ? Color(hex: light.color) : Color.primary.opacity(0.1))
-                    .overlay(Circle().strokeBorder(Color.primary.opacity(canPickColor ? 0.35 : 0.2), lineWidth: 0.75))
-                    .frame(width: 14, height: 14)
-                    .opacity(light.reachable ? 1 : 0.4)
-                    .contentShape(Circle())
+                ZStack {
+                    Circle()
+                        .fill(light.on ? Color(hex: light.color) : Color.primary.opacity(0.14))
+                        .overlay(Circle().strokeBorder(Color.primary.opacity(canPickColor ? 0.30 : 0.20), lineWidth: 0.75))
+                        .shadow(color: light.on ? Color(hex: light.color).opacity(0.45) : .clear, radius: 4)
+                        .frame(width: 24, height: 24)
+                    Image(systemName: chosenIcon.sfSymbol(lit: light.on))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(light.on ? (prefersDarkGlyph(light.color) ? Color.black : Color.white) : Color.secondary)
+                }
+                .opacity(light.reachable ? 1 : 0.45)
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .help(canPickColor ? store.tr("Color, warmth & effects") : light.name)
@@ -528,33 +648,51 @@ struct LightRow: View {
 
             if light.dimmable {
                 BrightnessSlider(target: HueStore.target(light: light), bridge: light.on ? light.bri : 1)
-                    .frame(width: 105)
+                    .frame(width: 98)
             }
 
             Menu {
+                Button(store.tr("Brightness…")) {
+                    activeLampDialog = .brightness(light.id)
+                }
+                Button(store.tr("Color & Warmth…")) {
+                    showColorPopover = true
+                }
+                Button(store.tr("Rename…")) {
+                    activeLampDialog = .rename(light.id)
+                }
+                Button(store.tr("Lamp icon…")) {
+                    activeLampDialog = .icon(light.id)
+                }
                 Button(store.tr("Themes …")) {
                     store.themeEditorLight = light
                 }
+                Divider()
+                Button(store.tr("Wire rule on Map")) {
+                    if proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode) {
+                        store.openMapInRulesMode(wiringLightID: light.id)
+                    } else {
+                        store.showProUpgradeSheet = true
+                    }
+                }
                 Button(store.tr("Schedule this light …")) {
                     store.openScheduleFor(kind: "light", id: light.id)
-                }
-                Button(store.tr("Link with another light …")) {
-                    store.openRuleFor(kind: "light", id: light.id)
                 }
                 Divider()
                 Button(isFav ? store.tr("Remove from Favorites") : store.tr("Pin to Favorites")) {
                     store.toggleFavorite(favKey)
                 }
             } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 11))
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 18)
+                    .frame(width: 20, height: 20)
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
-            .frame(width: 18)
+            .frame(width: 20)
+            .help(store.tr("Lamp options"))
 
             Toggle("", isOn: Binding(get: { light.on }, set: { store.setLight(light, on: $0) }))
                 .toggleStyle(.switch)
@@ -563,6 +701,25 @@ struct LightRow: View {
         }
         .padding(.vertical, 3)
         .padding(.leading, 4)
+        .sheet(item: $activeLampDialog) { dialog in
+            switch dialog {
+            case .brightness(let lightID):
+                LampBrightnessSheet(lightID: lightID)
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .preferredColorScheme(store.preferredColorScheme)
+            case .rename(let lightID):
+                LampRenameSheet(lightID: lightID)
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .preferredColorScheme(store.preferredColorScheme)
+            case .icon(let lightID):
+                LampIconPickerSheet(lightID: lightID)
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .preferredColorScheme(store.preferredColorScheme)
+            }
+        }
     }
 }
 

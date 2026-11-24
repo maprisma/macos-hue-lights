@@ -1028,6 +1028,7 @@ public final class HueToolDispatcher {
             "ip": .string(b.ip),
             "model": .string(b.model),
             "is_pro": .bool(b.isPro),
+            "motion_area_candidates": .int(b.motionAreaCandidates),
         ])
     }
 

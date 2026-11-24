@@ -36,6 +36,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     private var entertainmentServiceByLight: [String: String] = [:]
     private var bridgeModelID: String = ""
     private var bridgeIsPro: Bool = false
+    private var motionAreaCandidates: Int = 0
     private var motionAreas: [HueMotionArea] = []
     private var sensors: [HueSensor] = []
     private var sensorServiceToSensorID: [String: String] = [:]
@@ -324,6 +325,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         entertainmentServiceByLight = [:]
         bridgeModelID = ""
         bridgeIsPro = false
+        motionAreaCandidates = 0
         motionAreas = []
         sensors = []
         sensorServiceToSensorID = [:]
@@ -1177,6 +1179,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                 bridgeModelID = model.bridgeModelID
             }
             bridgeIsPro = model.isPro || (credentials?.model.uppercased() == "BSB003")
+            motionAreaCandidates = model.motionAreaCandidates
             motionAreas = model.motionAreas
             sensors = model.sensors
             sensorServiceToSensorID = model.sensorServiceToSensorID
@@ -1745,8 +1748,15 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     public func currentSnapshot() -> HueSnapshot {
         let info = credentials.map { creds -> BridgeInfo in
             let mid = bridgeModelID.isEmpty ? creds.model : bridgeModelID
-            let pro = bridgeIsPro || mid.uppercased() == "BSB003" || !motionAreas.isEmpty
-            return BridgeInfo(ip: creds.ip, name: creds.name, model: creds.model, modelID: mid, isPro: pro)
+            let pro = bridgeIsPro || mid.uppercased() == "BSB003" || !motionAreas.isEmpty || motionAreaCandidates > 0
+            return BridgeInfo(
+                ip: creds.ip,
+                name: creds.name,
+                model: creds.model,
+                modelID: mid,
+                isPro: pro,
+                motionAreaCandidates: motionAreaCandidates
+            )
         }
         return HueSnapshot(
             phase: phase,

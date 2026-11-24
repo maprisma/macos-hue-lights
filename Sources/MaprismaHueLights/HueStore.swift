@@ -64,6 +64,7 @@ final class HueStore: ObservableObject {
     @Published var rulePrefillTrigger: (kind: String, id: String)?
     @Published var themeEditorLight: HueLight?
     @Published var showAskAISheet: Bool = false
+    @Published var showProUpgradeSheet: Bool = false
 
     // Visual Floorplan & Spatial Light Studio
     @Published var floorplan: FloorplanDocument = FloorplanDocument()
@@ -72,6 +73,9 @@ final class HueStore: ObservableObject {
     @Published var floorplanStatusMessage: String? = nil
     @Published var floorplanBackgroundError: String? = nil
     @Published var dismissedFloorplanDiffKey: String = ""
+    @Published var motionAwareHintDismissed: Bool = false
+    @Published var pendingMapMode: String? = nil
+    @Published var pendingMapWireLightID: String? = nil
     @Published private(set) var lastFiredRuleID: String? = nil
     @Published private(set) var lastFiredRuleAt: Date = .distantPast
     private var floorplanLoadedForBridgeID: String = ""
@@ -214,13 +218,18 @@ final class HueStore: ObservableObject {
         }
     }
 
-    // MARK: - Demo Mode
+    // MARK: - Demo Mode & Free Access Fallbacks
 
-    func enterDemoMode() {
+    var isDemoMode: Bool { snapshot.isDemo }
+
+    func enterDemoMode(keepingTab: MainTab? = nil) {
         stopSynth()
         client.stop()
         expanded.removeAll()
         allScenes.removeAll()
+        motionAwareHintDismissed = false
+        pendingMapMode = nil
+        pendingMapWireLightID = nil
         filter = .all
         searchText = ""
         synthSource = .demoBeat
@@ -232,7 +241,7 @@ final class HueStore: ObservableObject {
         rulesPaused = false
         demo.start()
         page = .main
-        tab = .lights
+        tab = keepingTab ?? .lights
     }
 
     func exitDemoMode() {
@@ -241,6 +250,9 @@ final class HueStore: ObservableObject {
         client.stop()
         expanded.removeAll()
         allScenes.removeAll()
+        motionAwareHintDismissed = false
+        pendingMapMode = nil
+        pendingMapWireLightID = nil
         synthSource = .systemAudio
         let savedRules = settings.loadRules()
         let savedPaused = settings.rulesPaused()
@@ -251,6 +263,21 @@ final class HueStore: ObservableObject {
         native.start()
         page = .main
         tab = .lights
+    }
+
+    /// Ensures Free mode on a real Hue Bridge falls back cleanly to the free native skin
+    /// and stops Pro-only live sessions (e.g. after leaving Demo Mode without a Pro unlock).
+    func enforceFreeAccessFallbacks(isProUnlocked: Bool) {
+        guard !isProUnlocked && !isDemoMode else { return }
+        if !ProAccessPolicy.isSkinFree(skin) {
+            setSkin(.system)
+        }
+        if synthRunning {
+            stopSynth()
+        }
+        if showAskAISheet {
+            showAskAISheet = false
+        }
     }
 
     // MARK: - Texts & Localization
@@ -1093,6 +1120,25 @@ final class HueStore: ObservableObject {
         return snapshot.motionAreas.contains { $0.roomID == roomID && $0.enabled && $0.motion }
     }
 
+    var shouldShowMotionAwareSetupHint: Bool {
+        snapshot.bridge?.isPro == true && snapshot.motionAreas.isEmpty && !motionAwareHintDismissed
+    }
+
+    var motionAwareEligibleRooms: [HueRoom] {
+        snapshot.rooms.filter { $0.kind == "room" && $0.lights.count >= 3 }
+    }
+
+    func dismissMotionAwareHint() {
+        motionAwareHintDismissed = true
+    }
+
+    func openMapInRulesMode(wiringLightID: String? = nil) {
+        page = .main
+        tab = .map
+        pendingMapMode = "rules"
+        pendingMapWireLightID = wiringLightID
+    }
+
     // MARK: - Bridge
 
     func discover() { client.discover() }
@@ -1109,6 +1155,9 @@ final class HueStore: ObservableObject {
         confirmUnpair = false
         expanded.removeAll()
         allScenes.removeAll()
+        motionAwareHintDismissed = false
+        pendingMapMode = nil
+        pendingMapWireLightID = nil
         client.unpair()
         page = .main
     }
@@ -1249,6 +1298,10 @@ final class HueStore: ObservableObject {
         persistFloorplan()
     }
 
+    func lampIcon(for light: HueLight) -> LampIcon {
+        floorplan.lamps[light.id]?.icon ?? LampIcon.inferred(for: light.name)
+    }
+
     func updateLampPlacement(_ lightID: String, z: Double? = nil, icon: LampIcon? = nil) {
         guard var placement = floorplan.lamps[lightID] else { return }
         if let z = z { placement.z = HueColorMath.clamp(z, -1.0, 1.0) }
@@ -1258,7 +1311,22 @@ final class HueStore: ObservableObject {
     }
 
     func setLampIcon(_ lightID: String, icon: LampIcon) {
-        updateLampPlacement(lightID, icon: icon)
+        if var placement = floorplan.lamps[lightID] {
+            placement.icon = icon
+            floorplan.lamps[lightID] = placement
+            persistFloorplan()
+            return
+        }
+        let pos: (Double, Double)
+        if let ownerRoom = snapshot.rooms.first(where: { $0.kind == "room" && $0.lights.contains(where: { $0.id == lightID }) }),
+           let box = floorplan.boxes.first(where: { $0.hueID == ownerRoom.hueID }) {
+            let offset = Double((floorplan.lamps.count % 5) - 2) * 28.0
+            pos = (floorplan.snapped(box.centerX + offset), floorplan.snapped(box.centerY + 12))
+        } else {
+            pos = (floorplan.snapped(floorplan.canvas.width / 2), floorplan.snapped(floorplan.canvas.height / 2))
+        }
+        floorplan.lamps[lightID] = FloorplanLampPlacement(x: pos.0, y: pos.1, z: 0.0, icon: icon)
+        persistFloorplan()
     }
 
     func renameLight(id: String, name: String) {

@@ -3,6 +3,20 @@ import HueCore
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum LampDialogSheet: Identifiable {
+    case brightness(String)
+    case rename(String)
+    case icon(String)
+
+    var id: String {
+        switch self {
+        case .brightness(let lightID): return "brightness:\(lightID)"
+        case .rename(let lightID): return "rename:\(lightID)"
+        case .icon(let lightID): return "icon:\(lightID)"
+        }
+    }
+}
+
 /// Interactive 2D Visual Floorplan & Spatial Light Studio (`Map` tab).
 /// Supports 6 editable architectural prototypes, custom floorplan background image,
 /// resizable Room/Zone boxes with inline Scenes & Scene Scheduling, glowing live Hue lamp nodes,
@@ -16,20 +30,6 @@ struct MapView: View {
     enum SidebarFilter: String, CaseIterable, Identifiable {
         case all, unplaced
         var id: String { rawValue }
-    }
-
-    enum LampDialogSheet: Identifiable {
-        case brightness(String)
-        case rename(String)
-        case icon(String)
-
-        var id: String {
-            switch self {
-            case .brightness(let lightID): return "brightness:\(lightID)"
-            case .rename(let lightID): return "rename:\(lightID)"
-            case .icon(let lightID): return "icon:\(lightID)"
-            }
-        }
     }
 
     struct WireEndpoint: Equatable, Hashable {
@@ -56,6 +56,7 @@ struct MapView: View {
     }
 
     @EnvironmentObject var store: HueStore
+    @EnvironmentObject var proStore: ProStoreManager
     @Environment(\.openWindow) private var openWindow
     var isCompact: Bool = false
 
@@ -94,11 +95,36 @@ struct MapView: View {
     }
 
     var body: some View {
+        if !proStore.isUnlocked(.floorplan, isDemoMode: store.isDemoMode) {
+            ProLockedOverlay(
+                feature: .floorplan,
+                symbol: "map.fill",
+                accentHex: "#38bdf8",
+                title: store.tr("Visual Floorplan Studio"),
+                description: store.tr("Arrange rooms, zones, furniture, and glowing lamps on an interactive 2D map, or place your own floorplan image behind them."),
+                highlights: [
+                    store.tr("6 editable apartment & house prototypes plus custom background images"),
+                    store.tr("12 custom lamp icons, inline scenes & 1-click Hue Bridge sync"),
+                    store.tr("Drag-to-connect visual rule wires & Hue sensors"),
+                ]
+            )
+        } else {
+            mapStudioBody
+        }
+    }
+
+    private var mapStudioBody: some View {
         VStack(spacing: 0) {
             toolbar
             Divider()
             syncBannerIfNeeded
             statusToastIfNeeded
+            if store.shouldShowMotionAwareSetupHint {
+                MotionAwareSetupHintBanner()
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                Divider()
+            }
 
             HStack(spacing: 0) {
                 if sidebarOpen {
@@ -112,6 +138,13 @@ struct MapView: View {
         }
         .onAppear {
             sidebarOpen = !isCompact
+            consumePendingMapNavigation()
+        }
+        .onChange(of: store.pendingMapMode) { _ in
+            consumePendingMapNavigation()
+        }
+        .onChange(of: store.pendingMapWireLightID) { _ in
+            consumePendingMapNavigation()
         }
         .onChange(of: mode) { newMode in
             if newMode != .rules {
@@ -533,7 +566,7 @@ struct MapView: View {
     }
 
     private func sidebarLampRow(light: HueLight, placed: Bool) -> some View {
-        let chosenIcon = store.floorplan.lamps[light.id]?.icon ?? LampIcon.inferred(for: light.name)
+        let chosenIcon = store.lampIcon(for: light)
         return HStack(spacing: 6) {
             ZStack {
                 Circle()
@@ -608,6 +641,9 @@ struct MapView: View {
                     Button(store.tr("Rename…")) {
                         activeLampDialog = .rename(light.id)
                     }
+                    Button(store.tr("Lamp icon…")) {
+                        activeLampDialog = .icon(light.id)
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -637,6 +673,25 @@ struct MapView: View {
                 centerViewport(onWorld: CGPoint(x: placement.x, y: placement.y))
             } else {
                 placeLampSmartly(light)
+            }
+        }
+    }
+
+    private func consumePendingMapNavigation() {
+        if let requested = store.pendingMapMode {
+            store.pendingMapMode = nil
+            mode = (requested == "rules") ? .rules : .map
+        }
+        if let wireLightID = store.pendingMapWireLightID {
+            store.pendingMapWireLightID = nil
+            mode = .rules
+            selectedLightID = wireLightID
+            selectedSensorID = nil
+            if let placement = store.floorplan.lamps[wireLightID] {
+                armedRuleSource = WireEndpoint(kind: "light", id: wireLightID)
+                centerViewport(onWorld: CGPoint(x: placement.x, y: placement.y))
+            } else {
+                sidebarOpen = true
             }
         }
     }
@@ -2986,7 +3041,7 @@ private struct FloorplanBackgroundSheet: View {
 
 // MARK: - Focused Lamp Dialog Sheets (Brightness, Rename, Icon)
 
-private struct LampBrightnessSheet: View {
+struct LampBrightnessSheet: View {
     @EnvironmentObject var store: HueStore
     @Environment(\.dismiss) private var dismiss
 
@@ -3085,7 +3140,7 @@ private struct LampBrightnessSheet: View {
     }
 }
 
-private struct LampRenameSheet: View {
+struct LampRenameSheet: View {
     @EnvironmentObject var store: HueStore
     @Environment(\.dismiss) private var dismiss
 
@@ -3143,7 +3198,7 @@ private struct LampRenameSheet: View {
     }
 }
 
-private struct LampIconPickerSheet: View {
+struct LampIconPickerSheet: View {
     @EnvironmentObject var store: HueStore
     @Environment(\.dismiss) private var dismiss
 

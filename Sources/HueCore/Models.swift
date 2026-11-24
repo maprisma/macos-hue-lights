@@ -185,19 +185,28 @@ public struct BridgeCandidate: Identifiable, Equatable, Hashable, Sendable {
     }
 }
 
-public struct BridgeInfo: Equatable, Hashable, Sendable {
+public struct BridgeInfo: Equatable, Hashable, Codable, Sendable {
     public let ip: String
     public let name: String
     public let model: String
     public var modelID: String = ""
     public var isPro: Bool = false
+    public var motionAreaCandidates: Int = 0
+
+    enum CodingKeys: String, CodingKey {
+        case ip, name, model
+        case modelID = "model_id"
+        case isPro = "is_pro"
+        case motionAreaCandidates = "motion_area_candidates"
+    }
 
     public init(
         ip: String,
         name: String,
         model: String,
         modelID: String = "",
-        isPro: Bool = false
+        isPro: Bool = false,
+        motionAreaCandidates: Int = 0
     ) {
         self.ip = ip
         self.name = name
@@ -205,6 +214,25 @@ public struct BridgeInfo: Equatable, Hashable, Sendable {
         let resolvedModelID = modelID.isEmpty ? model : modelID
         self.modelID = resolvedModelID
         self.isPro = isPro || resolvedModelID.uppercased() == "BSB003"
+        self.motionAreaCandidates = max(0, motionAreaCandidates)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let ip = try c.decodeIfPresent(String.self, forKey: .ip) ?? ""
+        let name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        let model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        let modelID = try c.decodeIfPresent(String.self, forKey: .modelID) ?? ""
+        let isPro = try c.decodeIfPresent(Bool.self, forKey: .isPro) ?? false
+        let candidates = try c.decodeIfPresent(Int.self, forKey: .motionAreaCandidates) ?? 0
+        self.init(
+            ip: ip,
+            name: name,
+            model: model,
+            modelID: modelID,
+            isPro: isPro,
+            motionAreaCandidates: candidates
+        )
     }
 
     /// "Name · 192.168.1.2", as in the Linux panels.
@@ -679,7 +707,8 @@ public struct HueSnapshot: Equatable, Sendable {
                 name: JSONValue.string(b, "name"),
                 model: JSONValue.string(b, "model"),
                 modelID: JSONValue.string(b, "model_id"),
-                isPro: JSONValue.bool(b, "is_pro")
+                isPro: JSONValue.bool(b, "is_pro"),
+                motionAreaCandidates: JSONValue.optionalInt(b, "motion_area_candidates") ?? 0
             )
         } else {
             bridge = nil
@@ -963,6 +992,7 @@ public struct HueBuiltModel: Equatable, Sendable {
     public let entertainmentServiceByLight: [String: String]
     public let bridgeModelID: String
     public let isPro: Bool
+    public let motionAreaCandidates: Int
     public let motionAreas: [HueMotionArea]
     public let sensors: [HueSensor]
     public let sensorServiceToSensorID: [String: String]
@@ -979,6 +1009,7 @@ public struct HueBuiltModel: Equatable, Sendable {
         entertainmentServiceByLight: [String: String] = [:],
         bridgeModelID: String = "",
         isPro: Bool = false,
+        motionAreaCandidates: Int = 0,
         motionAreas: [HueMotionArea] = [],
         sensors: [HueSensor] = [],
         sensorServiceToSensorID: [String: String] = [:],
@@ -994,6 +1025,7 @@ public struct HueBuiltModel: Equatable, Sendable {
         self.entertainmentServiceByLight = entertainmentServiceByLight
         self.bridgeModelID = bridgeModelID
         self.isPro = isPro
+        self.motionAreaCandidates = max(0, motionAreaCandidates)
         self.motionAreas = motionAreas
         self.sensors = sensors
         self.sensorServiceToSensorID = sensorServiceToSensorID
@@ -1321,7 +1353,8 @@ public enum HueModelBuilder {
             ))
         }
         motionAreas.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        let isPro = bridgeModelID.uppercased() == "BSB003" || !motionAreas.isEmpty
+        let motionAreaCandidatesCount = candidateLights.count
+        let isPro = bridgeModelID.uppercased() == "BSB003" || !motionAreas.isEmpty || motionAreaCandidatesCount > 0
 
         // Physical Hue Sensors (motion, contact, button grouped per device + temperature, light_level, device_power)
         var roomByDeviceID: [String: String] = [:]
@@ -1841,6 +1874,7 @@ public enum HueModelBuilder {
             entertainmentServiceByLight: entertainmentServiceByLight,
             bridgeModelID: bridgeModelID,
             isPro: isPro,
+            motionAreaCandidates: motionAreaCandidatesCount,
             motionAreas: motionAreas,
             sensors: sensors,
             sensorServiceToSensorID: sensorServiceToSensorID,

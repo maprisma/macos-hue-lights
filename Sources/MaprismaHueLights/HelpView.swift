@@ -1,19 +1,60 @@
 import HueCore
 import SwiftUI
 
+enum HelpFeature: Int, CaseIterable, Identifiable, Equatable, Sendable {
+    case lights, floorplan, rules, motionAware, schedules, synth, skins, askAI, mcpServer
+    var id: Int { rawValue }
+}
+
 /// Animated visual feature guide accessible from the header `?` button.
 /// Uses a single `TimelineView` that runs ONLY while `HelpView` is visible (zero idle CPU cost).
 struct HelpView: View {
     @EnvironmentObject var store: HueStore
+    var onTryFeature: ((HelpFeature) -> Void)? = nil
 
-    private enum GuideFeature: Int, CaseIterable, Identifiable {
-        case lights, floorplan, rules, motionAware, schedules, synth, skins, askAI, mcpServer
-        var id: Int { rawValue }
-    }
+    @State private var selectedFeature: HelpFeature? = nil
+    @State private var hoveredFeature: HelpFeature? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            headerBar
+
+            Divider()
+
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                if let feature = selectedFeature {
+                    detailView(for: feature, time: t)
+                } else {
+                    overviewList(time: t)
+                }
+            }
+        }
+    }
+
+    // MARK: - Top Navigation Bar
+
+    private var headerBar: some View {
+        HStack {
+            if let feature = selectedFeature {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        selectedFeature = nil
+                    }
+                } label: {
+                    Label(store.tr("All features"), systemImage: "chevron.left")
+                        .font(store.scaledFont(12.5, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.cancelAction)
+
+                Spacer(minLength: 8)
+
+                Text(title(for: feature))
+                    .font(store.scaledFont(11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
                 Button {
                     store.page = .main
                 } label: {
@@ -22,72 +63,222 @@ struct HelpView: View {
                 }
                 .buttonStyle(.borderless)
                 .keyboardShortcut(.cancelAction)
+
                 Spacer()
+
                 Text(store.tr("Help & Guide").uppercased())
                     .font(store.scaledFont(11, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
 
-            Divider()
+    // MARK: - Overview List (9 Clickable Feature Cards)
 
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(store.tr("Quick visual tour of Maprisma Lights features."))
-                            .font(store.scaledFont(11.5))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 2)
+    private func overviewList(time: TimeInterval) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(store.tr("Click any feature for a larger visual walkthrough"))
+                    .font(store.scaledFont(11.5))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 2)
 
-                        ForEach(GuideFeature.allCases) { feature in
-                            featureCard(feature, time: t)
-                        }
-                    }
-                    .padding(14)
+                ForEach(HelpFeature.allCases) { feature in
+                    featureCard(feature, time: time)
                 }
             }
+            .padding(14)
         }
     }
 
-    private func featureCard(_ feature: GuideFeature, time: TimeInterval) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            featureCanvas(feature, time: time)
-                .frame(width: 124, height: 84)
+    private func featureCard(_ feature: HelpFeature, time: TimeInterval) -> some View {
+        let isHovered = hoveredFeature == feature
+        return Button {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                selectedFeature = feature
+            }
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                featureCanvas(feature, time: time)
+                    .frame(width: 124, height: 84)
+                    .background(
+                        RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
+                            .fill(Color(red: 0.08, green: 0.09, blue: 0.13))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
+                            .strokeBorder(isHovered ? store.skinAccentColor.opacity(0.65) : store.cardBorderColor, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title(for: feature))
+                        .font(store.scaledFont(12.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    Text(description(for: feature))
+                        .font(store.scaledFont(11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 4) {
+                        Text(store.tr("Tap for step-by-step guide"))
+                            .font(store.scaledFont(10, weight: .medium))
+                            .foregroundStyle(store.skinAccentColor)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(store.skinAccentColor)
+                    }
+                    .padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isHovered ? store.skinAccentColor : Color.secondary.opacity(0.65))
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                    .fill(isHovered ? store.skinAccentColor.opacity(0.08) : store.cardBackgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                    .strokeBorder(isHovered ? store.skinAccentColor.opacity(0.55) : store.cardBorderColor, lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering {
+                hoveredFeature = feature
+            } else if hoveredFeature == feature {
+                hoveredFeature = nil
+            }
+        }
+    }
+
+    // MARK: - Interactive Step-by-Step Detail View
+
+    private func detailView(for feature: HelpFeature, time: TimeInterval) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                // Large crisp scaled vector animation preview
+                featureCanvas(feature, time: time)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 200)
+                    .background(
+                        RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                            .fill(Color(red: 0.08, green: 0.09, blue: 0.13))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                            .strokeBorder(store.cardBorderColor, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous))
+
+                // Title & plain-language overview
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(title(for: feature))
+                        .font(store.scaledFont(15, weight: .semibold))
+                    Text(description(for: feature))
+                        .font(store.scaledFont(12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Numbered "How to do it" walkthrough
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(store.tr("How to do it").uppercased())
+                        .font(store.scaledFont(10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    let stepList = steps(for: feature)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(stepList.enumerated()), id: \.offset) { index, step in
+                            HStack(alignment: .top, spacing: 9) {
+                                Text("\(index + 1)")
+                                    .font(store.scaledFont(10.5, weight: .bold).monospacedDigit())
+                                    .foregroundStyle(Color.white)
+                                    .frame(width: 20, height: 20)
+                                    .background(Circle().fill(store.skinAccentColor))
+
+                                Text(step)
+                                    .font(store.scaledFont(11.5))
+                                    .foregroundStyle(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(11)
+                    .background(
+                        RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                            .fill(store.cardBackgroundColor)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                            .strokeBorder(store.cardBorderColor, lineWidth: 1)
+                    )
+                }
+
+                // Highlighted Quick Tip callout
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "lightbulb.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(store.skinAccentColor)
+                        .padding(.top, 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(store.tr("Quick Tip"))
+                            .font(store.scaledFont(11, weight: .semibold))
+                            .foregroundStyle(store.skinAccentColor)
+                        Text(tip(for: feature))
+                            .font(store.scaledFont(11.5))
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
-                        .fill(Color(red: 0.08, green: 0.09, blue: 0.13))
+                    RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                        .fill(store.skinAccentColor.opacity(0.11))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
-                        .strokeBorder(store.cardBorderColor, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                        .strokeBorder(store.skinAccentColor.opacity(0.35), lineWidth: 1)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title(for: feature))
-                    .font(store.scaledFont(12.5, weight: .semibold))
-                    .lineLimit(2)
-                Text(description(for: feature))
-                    .font(store.scaledFont(11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                // Try it now primary action
+                HStack {
+                    Button {
+                        if let onTryFeature = onTryFeature {
+                            onTryFeature(feature)
+                        } else {
+                            store.page = .main
+                        }
+                    } label: {
+                        Label(store.tr("Try it now"), systemImage: "arrow.right.circle.fill")
+                            .font(store.scaledFont(12.5, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+                .padding(.top, 2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .fill(store.cardBackgroundColor)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .strokeBorder(store.cardBorderColor, lineWidth: 1)
-        )
     }
 
-    private func title(for feature: GuideFeature) -> String {
+    // MARK: - Feature Copy (Titles, Descriptions, Numbered Steps & Quick Tips)
+
+    private func title(for feature: HelpFeature) -> String {
         switch feature {
         case .lights: return store.tr("Lights, Color & Themes")
         case .floorplan: return store.tr("Visual Floorplan Map")
@@ -101,7 +292,7 @@ struct HelpView: View {
         }
     }
 
-    private func description(for feature: GuideFeature) -> String {
+    private func description(for feature: HelpFeature) -> String {
         switch feature {
         case .lights:
             return store.tr("Control rooms and lamps with live brightness sliders, color & warmth pickers, native effects, and custom per-lamp themes.")
@@ -124,29 +315,133 @@ struct HelpView: View {
         }
     }
 
+    private func steps(for feature: HelpFeature) -> [String] {
+        switch feature {
+        case .lights:
+            return [
+                store.tr("Click any room card to expand its individual lamps, or flip the room switch to toggle the whole room."),
+                store.tr("Drag the brightness slider, or click a lamp's colored icon to pick warmth (Kelvin), colors, and native Hue effects."),
+                store.tr("Open the ⋯ menu on any lamp card for Brightness, Color & Warmth, Rename, 12 Lamp Icons, Themes, or Wire rule on Map."),
+                store.tr("Pin your favorite rooms or lamps to show a 1-click Favorites strip at the top of Lights."),
+            ]
+        case .floorplan:
+            return [
+                store.tr("Open the Map tab and pick a starter layout from Prototypes, or load your own floorplan image under View → Background…."),
+                store.tr("Drag room boxes by their header to arrange your home, and pull the corner handles to resize them."),
+                store.tr("Click any lamp in the left sidebar to place it on the map, then drag it into the room where it sits."),
+                store.tr("Click Sync All in the toolbar when you want to push renamed or moved rooms to your Hue Bridge."),
+            ]
+        case .rules:
+            return [
+                store.tr("Open the Map tab and switch the top toggle from Map to Rules."),
+                store.tr("Drag from a lamp, room connector, or sensor onto another lamp — or click one lamp, then click the target."),
+                store.tr("Choose Follow / Mirror, Exclusive, or Companion and optionally add an active time window."),
+                store.tr("Click any colored wire or its midpoint badge anytime to edit, toggle, or delete the rule."),
+            ]
+        case .motionAware:
+            return [
+                store.tr("With a Philips Hue Bridge Pro, open the Philips Hue mobile app → Settings → MotionAware and calibrate any room with 3+ lights once."),
+                store.tr("Compatible lamps automatically show a live radar badge in Lights and on the Map, glowing green when presence is detected."),
+                store.tr("Click the slider button on a room box in Map to enable or disable MotionAware and tune sensitivity."),
+                store.tr("Place physical Hue motion, contact, or switch sensors from the Map sidebar and wire them to lamps in Rules mode."),
+            ]
+        case .schedules:
+            return [
+                store.tr("Open the Schedules tab and click + New Schedule."),
+                store.tr("Select a room or lamp and choose a Fixed time, Sunrise, or Sunset trigger with optional weekday repeats."),
+                store.tr("Pick Turn on, Turn off, or a saved Scene, plus an optional fade duration."),
+                store.tr("Choose On Hue Bridge (runs 24/7) or On this Mac (live) anytime in Settings."),
+            ]
+        case .synth:
+            return [
+                store.tr("Open the Synth tab and select System Audio (music/movies), Microphone, or Demo Beat."),
+                store.tr("Choose a room or Hue Entertainment Area, then pick an animation Mode and Color Palette."),
+                store.tr("Optionally assign Bass, Mids, or Treble to individual lamps for multi-band effects."),
+                store.tr("Press Start to sync your lights live — audio is analyzed in memory only and never recorded."),
+            ]
+        case .skins:
+            return [
+                store.tr("Open Settings (gear icon) and choose from 6 coordinated App Skins or customize corners, backdrop, and font."),
+                store.tr("Pick one of 8 Menu Bar Icons and optionally display the lit light count beside it."),
+                store.tr("Assign Global Shortcuts to control lights or toggle Synth from any macOS app."),
+            ]
+        case .askAI:
+            return [
+                store.tr("Ask AI is off by default — turn it on anytime under Settings → Ask AI."),
+                store.tr("Click the ✨ button in the header or press ⌘K to open the command bar."),
+                store.tr("Type natural requests like \"Dim Living Room to 40% warm\" or \"Turn on Hallway at 07:30 weekdays\"."),
+                store.tr("Offline parsing runs locally first; you can optionally connect a local Ollama server on 127.0.0.1."),
+            ]
+        case .mcpServer:
+            return [
+                store.tr("Start Maprisma Lights from Terminal or an AI client with the --mcp argument to expose the local stdio MCP server."),
+                store.tr("Connect any MCP-compatible AI agent to read rooms, lights, sensors, rules, schedules, and floorplans."),
+                store.tr("Every command stays on your local network over your pinned Hue Bridge connection — credentials are never exposed."),
+            ]
+        }
+    }
+
+    private func tip(for feature: HelpFeature) -> String {
+        switch feature {
+        case .lights:
+            return store.tr("Lamp icons you choose in Lights sync 1:1 with your Visual Floorplan Map!")
+        case .floorplan:
+            return store.tr("Click the expand button in the top-right corner to open the Map in a full resizable desktop window.")
+        case .rules:
+            return store.tr("You can also open any lamp's ⋯ menu in the Lights tab and pick \"Wire rule on Map\" to jump straight into wiring it.")
+        case .motionAware:
+            return store.tr("MotionAware™ works with your existing Hue bulbs — no separate motion sensor hardware needed once calibrated on Bridge Pro.")
+        case .schedules:
+            return store.tr("Bridge schedules keep running even when your Mac is asleep or turned off.")
+        case .synth:
+            return store.tr("Link a Hue Entertainment Area for ultra-smooth 25 Hz light sync, or try Demo Beat first with zero permissions.")
+        case .skins:
+            return store.tr("Global shortcuts use native macOS hotkeys and need zero Accessibility permissions.")
+        case .askAI:
+            return store.tr("Want a completely minimal UI? Leave Ask AI turned off in Settings and the ✨ button stays hidden.")
+        case .mcpServer:
+            return store.tr("Read the hue://state resource for a complete snapshot of rooms, lights, themes, rules, and MotionAware status in one call.")
+        }
+    }
+
+    // MARK: - Scalable Vector Canvas
+
     @ViewBuilder
-    private func featureCanvas(_ feature: GuideFeature, time: TimeInterval) -> some View {
+    private func featureCanvas(_ feature: HelpFeature, time: TimeInterval) -> some View {
         Canvas { ctx, size in
-            switch feature {
-            case .lights:
-                drawLightsPreview(in: &ctx, size: size, t: time)
-            case .floorplan:
-                drawFloorplanPreview(in: &ctx, size: size, t: time)
-            case .rules:
-                drawRulesPreview(in: &ctx, size: size, t: time)
-            case .motionAware:
-                drawMotionAwarePreview(in: &ctx, size: size, t: time)
-            case .schedules:
-                drawSchedulesPreview(in: &ctx, size: size, t: time)
-            case .synth:
-                drawSynthPreview(in: &ctx, size: size, t: time)
-            case .skins:
-                drawSkinsPreview(in: &ctx, size: size, t: time)
-            case .askAI:
-                drawAskAIPreview(in: &ctx, size: size, t: time)
-            case .mcpServer:
-                drawMCPPreview(in: &ctx, size: size, t: time)
-            }
+            drawPreview(feature, in: &ctx, size: size, t: time)
+        }
+    }
+
+    private func drawPreview(_ feature: HelpFeature, in ctx: inout GraphicsContext, size: CGSize, t: TimeInterval) {
+        let baseSize = CGSize(width: 124, height: 84)
+        let scale = min(size.width / baseSize.width, size.height / baseSize.height)
+        let offsetX = (size.width - baseSize.width * scale) / 2.0
+        let offsetY = (size.height - baseSize.height * scale) / 2.0
+
+        var scaled = ctx
+        scaled.translateBy(x: offsetX, y: offsetY)
+        scaled.scaleBy(x: scale, y: scale)
+
+        switch feature {
+        case .lights:
+            drawLightsPreview(in: &scaled, size: baseSize, t: t)
+        case .floorplan:
+            drawFloorplanPreview(in: &scaled, size: baseSize, t: t)
+        case .rules:
+            drawRulesPreview(in: &scaled, size: baseSize, t: t)
+        case .motionAware:
+            drawMotionAwarePreview(in: &scaled, size: baseSize, t: t)
+        case .schedules:
+            drawSchedulesPreview(in: &scaled, size: baseSize, t: t)
+        case .synth:
+            drawSynthPreview(in: &scaled, size: baseSize, t: t)
+        case .skins:
+            drawSkinsPreview(in: &scaled, size: baseSize, t: t)
+        case .askAI:
+            drawAskAIPreview(in: &scaled, size: baseSize, t: t)
+        case .mcpServer:
+            drawMCPPreview(in: &scaled, size: baseSize, t: t)
         }
     }
 

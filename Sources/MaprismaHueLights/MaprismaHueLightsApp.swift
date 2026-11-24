@@ -6,6 +6,8 @@ import SwiftUI
 
 /// Entrypoint that cleanly branches into the headless `--mcp` stdio JSON-RPC 2.0 server
 /// BEFORE SwiftUI / `NSApplication` starts, so AI agent invocations never open a window or steal focus.
+/// `--demo --mcp` is always free to test; on a real Philips Hue Bridge, MCP is part of Maprisma Hue Lights Pro
+/// (headless CLI invocation never crashes even if StoreKit is unavailable in ad-hoc builds).
 @main
 enum MaprismaHueLightsEntrypoint {
     @MainActor
@@ -25,15 +27,18 @@ enum MaprismaHueLightsEntrypoint {
 
 /// Maprisma Hue Lights for macOS: a 100% pure-Swift, App Sandbox-compliant menu bar app
 /// with an optional detachable resizable window, Light Synthesizer, Light Themes, App Skins,
-/// global hotkeys, optional local-first Ask AI, native `--mcp` server, and Apple Shortcuts (`AppIntents`).
+/// global hotkeys, optional local-first Ask AI, native `--mcp` server, StoreKit 2 Pro unlock,
+/// and Apple Shortcuts (`AppIntents`).
 struct MaprismaHueLightsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var store = HueStore.shared
+    @StateObject private var proStore = ProStoreManager()
 
     var body: some Scene {
         MenuBarExtra {
             ContentView(mode: .popover)
                 .environmentObject(store)
+                .environmentObject(proStore)
         } label: {
             MenuBarIcon(
                 style: store.menuBarIcon,
@@ -49,6 +54,7 @@ struct MaprismaHueLightsApp: App {
         Window("Maprisma Lights", id: "main-window") {
             ContentView(mode: .detached)
                 .environmentObject(store)
+                .environmentObject(proStore)
         }
         .defaultSize(width: 760, height: 640)
     }

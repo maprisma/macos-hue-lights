@@ -1019,6 +1019,7 @@ final class FloorplanTests: XCTestCase {
         let built = HueModelBuilder.build(from: resources)
         XCTAssertTrue(built.isPro)
         XCTAssertEqual(built.bridgeModelID, "BSB003")
+        XCTAssertEqual(built.motionAreaCandidates, 1)
         XCTAssertEqual(built.motionAreas.count, 1)
         XCTAssertEqual(built.motionAreas[0].lightIDs, [lightID])
         XCTAssertTrue(built.rooms[0].lights[0].motionAware)
@@ -1060,6 +1061,50 @@ final class FloorplanTests: XCTestCase {
         now += 5
         let firedOff = engine.evaluateSensorEvent(kind: "motion", id: motionID, state: "clear", snapshot: snap)
         XCTAssertEqual(firedOff.first?.on, false)
+    }
+
+    @MainActor
+    func testBridgeInfoMotionAreaCandidatesAndUncalibratedBridgePro() throws {
+        // Backwards-compatible Codable decode when motion_area_candidates is absent
+        let legacyData = Data(#"{"ip":"192.168.1.50","name":"Hue","model":"BSB002"}"#.utf8)
+        let legacyBridge = try JSONDecoder().decode(BridgeInfo.self, from: legacyData)
+        XCTAssertFalse(legacyBridge.isPro)
+        XCTAssertEqual(legacyBridge.motionAreaCandidates, 0)
+
+        // Codable round-trip with Bridge Pro + motionAreaCandidates
+        let proBridge = BridgeInfo(ip: "192.168.1.60", name: "Hue Pro", model: "BSB003", modelID: "BSB003", isPro: true, motionAreaCandidates: 4)
+        let encoded = try JSONEncoder().encode(proBridge)
+        let decodedPro = try JSONDecoder().decode(BridgeInfo.self, from: encoded)
+        XCTAssertEqual(decodedPro, proBridge)
+        XCTAssertTrue(decodedPro.isPro)
+        XCTAssertEqual(decodedPro.motionAreaCandidates, 4)
+
+        // Snapshot JSON parser reads motion_area_candidates and defaults safely to 0
+        let snapWithCands = try XCTUnwrap(HueSnapshot.parse(line: #"{"phase":"ok","bridge":{"ip":"192.168.1.60","name":"Hue Pro","model":"BSB003","model_id":"BSB003","is_pro":true,"motion_area_candidates":3}}"#))
+        XCTAssertTrue(snapWithCands.bridge?.isPro == true)
+        XCTAssertEqual(snapWithCands.bridge?.motionAreaCandidates, 3)
+
+        let snapLegacy = try XCTUnwrap(HueSnapshot.parse(line: #"{"phase":"ok","bridge":{"ip":"192.168.1.50","name":"Hue","model":"BSB002"}}"#))
+        XCTAssertEqual(snapLegacy.bridge?.motionAreaCandidates, 0)
+
+        // Uncalibrated Bridge Pro: 3 motion_area_candidate resources, 0 motion_area_configuration
+        let bridgeDevID = "22222222-2222-2222-2222-222222222220"
+        let resources: [[String: Any]] = [
+            ["id": "99999999-9999-9999-9999-999999999991", "type": "bridge", "owner": ["rid": bridgeDevID, "rtype": "device"]],
+            ["id": bridgeDevID, "type": "device", "product_data": ["model_id": "BSB003"]],
+            ["id": "55555555-5555-5555-5555-555555555501", "type": "motion_area_candidate"],
+            ["id": "55555555-5555-5555-5555-555555555502", "type": "motion_area_candidate"],
+            ["id": "55555555-5555-5555-5555-555555555503", "type": "motion_area_candidate"],
+        ]
+        let built = HueModelBuilder.build(from: resources)
+        XCTAssertTrue(built.isPro)
+        XCTAssertEqual(built.motionAreaCandidates, 3)
+        XCTAssertTrue(built.motionAreas.isEmpty)
+
+        // DemoBridgeClient exposes Bridge Pro candidate count
+        let demoSnap = DemoBridgeClient().currentSnapshot()
+        XCTAssertTrue(demoSnap.bridge?.isPro == true)
+        XCTAssertEqual(demoSnap.bridge?.motionAreaCandidates, 3)
     }
 }
 
@@ -1262,5 +1307,70 @@ final class AskAIAndMCPTests: XCTestCase {
         for secretKey in ["app_key", "appKey", "client_key", "clientKey", "fingerprint"] {
             XCTAssertFalse(resRead.contains(secretKey), "MCP hue://state must never expose \(secretKey)")
         }
+    }
+}
+
+final class ProAccessPolicyTests: XCTestCase {
+    func testProductIDAndAccessModes() {
+        XCTAssertEqual(ProAccessPolicy.proProductID, "com.maprisma.huelights.pro")
+        XCTAssertEqual(ProAccessPolicy.mode(isProUnlocked: false, isDemoMode: false), .free)
+        XCTAssertEqual(ProAccessPolicy.mode(isProUnlocked: false, isDemoMode: true), .demo)
+        XCTAssertEqual(ProAccessPolicy.mode(isProUnlocked: true, isDemoMode: false), .pro)
+        XCTAssertEqual(ProAccessPolicy.mode(isProUnlocked: true, isDemoMode: true), .pro)
+    }
+
+    func testFeatureUnlockMatrixFreeDemoPro() {
+        XCTAssertEqual(ProFeature.allCases.count, 7)
+        for feature in ProFeature.allCases {
+            // Free on a real Hue Bridge -> Pro features locked
+            XCTAssertFalse(
+                ProAccessPolicy.isUnlocked(feature, isProUnlocked: false, isDemoMode: false),
+                "Expected \(feature.rawValue) to be locked in Free mode"
+            )
+            // Demo Mode -> ALL Pro features unlocked for risk-free evaluation & App Review
+            XCTAssertTrue(
+                ProAccessPolicy.isUnlocked(feature, isProUnlocked: false, isDemoMode: true),
+                "Expected \(feature.rawValue) to be unlocked in Demo mode"
+            )
+            // Pro unlocked on real Bridge -> ALL Pro features unlocked
+            XCTAssertTrue(
+                ProAccessPolicy.isUnlocked(feature, isProUnlocked: true, isDemoMode: false),
+                "Expected \(feature.rawValue) to be unlocked in Pro mode"
+            )
+            // Pro unlocked + Demo -> unlocked
+            XCTAssertTrue(
+                ProAccessPolicy.isUnlocked(feature, isProUnlocked: true, isDemoMode: true),
+                "Expected \(feature.rawValue) to be unlocked in Pro + Demo mode"
+            )
+        }
+    }
+
+    func testIsSkinFree() {
+        XCTAssertTrue(ProAccessPolicy.isSkinFree("native"))
+        XCTAssertTrue(ProAccessPolicy.isSkinFree(""))
+        XCTAssertTrue(ProAccessPolicy.isSkinFree("system"))
+        XCTAssertTrue(ProAccessPolicy.isSkinFree("  Native  "))
+        XCTAssertTrue(ProAccessPolicy.isSkinFree(AppSkin.system))
+
+        for skin in AppSkin.allCases where skin != .system {
+            XCTAssertFalse(ProAccessPolicy.isSkinFree(skin), "Skin \(skin.rawValue) should require Pro")
+            XCTAssertFalse(ProAccessPolicy.isSkinFree(skin.rawValue), "Skin rawValue \(skin.rawValue) should require Pro")
+        }
+        XCTAssertFalse(ProAccessPolicy.isSkinFree("synthwave"))
+        XCTAssertFalse(ProAccessPolicy.isSkinFree("cozyCabin"))
+        XCTAssertFalse(ProAccessPolicy.isSkinFree("retroTerminal"))
+        XCTAssertFalse(ProAccessPolicy.isSkinFree("discoLava"))
+        XCTAssertFalse(ProAccessPolicy.isSkinFree("minimalZen"))
+    }
+
+    func testLastVerifiedProCliHintDefaultFalseAndRoundTrips() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hue-pro-hint-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = SettingsStore(directory: dir)
+        XCTAssertFalse(store.lastVerifiedPro())
+        try store.setLastVerifiedPro(true)
+        XCTAssertTrue(store.lastVerifiedPro())
+        try store.setLastVerifiedPro(false)
+        XCTAssertFalse(store.lastVerifiedPro())
     }
 }
