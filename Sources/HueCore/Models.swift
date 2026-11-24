@@ -1241,36 +1241,45 @@ public enum HueModelBuilder {
 enum JSONValue {
     static func string(_ d: [String: Any], _ k: String) -> String { d[k] as? String ?? "" }
 
-    static func bool(_ d: [String: Any], _ k: String) -> Bool { (d[k] as? Bool) == true }
+    private static func isJSONBool(_ raw: Any) -> Bool {
+        if type(of: raw) == Bool.self { return true }
+        #if canImport(CoreFoundation)
+        if let n = raw as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() {
+            return true
+        }
+        #endif
+        return false
+    }
+
+    static func bool(_ d: [String: Any], _ k: String) -> Bool {
+        guard let raw = d[k], isJSONBool(raw) else { return false }
+        return (raw as? Bool) == true
+    }
 
     static func optionalInt(_ d: [String: Any], _ k: String) -> Int? {
-        switch d[k] {
-        case is Bool: return nil
-        case let i as Int: return i
-        case let n as NSNumber:
-            #if canImport(CoreFoundation)
-            if CFGetTypeID(n) == CFBooleanGetTypeID() { return nil }
-            #endif
+        guard let raw = d[k], !isJSONBool(raw) else { return nil }
+        if let i = raw as? Int { return i }
+        if let n = raw as? NSNumber {
             let v = n.doubleValue
             return v.isFinite ? Int(v.rounded()) : nil
-        case let d as Double:
-            return d.isFinite ? Int(d.rounded()) : nil
-        default: return nil
         }
+        if let dbl = raw as? Double {
+            return dbl.isFinite ? Int(dbl.rounded()) : nil
+        }
+        return nil
     }
 
     static func number(_ d: [String: Any], _ k: String) -> Double {
+        guard let raw = d[k], !isJSONBool(raw) else { return 0 }
         let v: Double
-        switch d[k] {
-        case is Bool: return 0
-        case let n as NSNumber:
-            #if canImport(CoreFoundation)
-            if CFGetTypeID(n) == CFBooleanGetTypeID() { return 0 }
-            #endif
+        if let n = raw as? NSNumber {
             v = n.doubleValue
-        case let n as Double: v = n
-        case let n as Int: v = Double(n)
-        default: return 0
+        } else if let dbl = raw as? Double {
+            v = dbl
+        } else if let i = raw as? Int {
+            v = Double(i)
+        } else {
+            return 0
         }
         return v.isFinite ? v : 0
     }
