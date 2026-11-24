@@ -46,10 +46,15 @@
   > - Schedule any individual light or room by clock time or **Sunrise / Sunset** (± offset), weekdays, brightness, and smooth fade.
   > - Choose in Settings whether schedules run **natively on your Hue Bridge** (24/7 even while your Mac sleeps) or **live on your Mac**.
   >
-  > **Smart Linked-Light Rules & Mac Automation**
-  > - Link lights together in real time via Hue's live event stream: *"When Desk Lamp turns ON → also turn ON Monitor Backlight (and turn OFF together)"* or *"When TV Strip turns ON → turn OFF Ceiling"*.
+  > **Smart Linked-Light Rules, Sensors, Bridge Pro MotionAware™ & Mac Automation**
+  > - Link lights, rooms, **physical Hue sensors & switches** (motion, contact, buttons), and **Bridge Pro MotionAware™** radar presence areas together in real time via Hue's live event stream: *"When Hallway Motion detects motion → turn ON Hallway"* or *"When TV Strip turns ON → turn OFF Ceiling"*.
   > - Add time windows or *"only if off"* conditions, plus **Mac wake, sleep, and screen lock** triggers.
   > - Built-in cycle detection and echo suppression prevent flickering loops.
+  >
+  > **Built-in Animated Visual Help Guide, Optional Ask AI (Off by Default) & Local MCP Server**
+  > - Open the built-in **animated Help & Guide** (`?`) anytime for a calm visual tour of every feature.
+  > - **Ask AI is strictly optional and OFF by default:** prefer a pure, non-AI native Hue app? You will never see an AI button unless you turn it on in Settings. When enabled (`⌘K`), switch lights, apply themes, and create rules or schedules in plain English or German completely offline (with optional loopback-only local Ollama support).
+  > - **Local MCP Server (`--mcp`):** Power users can connect any local MCP-compatible AI agent over stdio directly to their Mac — zero cloud, bridge keys stay safely in macOS Keychain.
   >
   > **Live Audio Light Synthesizer**
   > - Sync your Hue lights to **streamed system music** (Spotify, Apple Music, YouTube) or your **microphone** using real-time 3-band FFT (Bass, Mids, Treble) and beat detection.
@@ -77,7 +82,8 @@
   > - **Menüleiste + eigenes Fenster:** Räume, Zonen, Einzellampen, Favoriten, Filter sowie „Alle an / Alle aus" mit Raum-Ausnahmen.
   > - **Lichtthemen-Editor pro Lampe:** Farbtemperatur, Farben, native Hue-Effekte (Kerze, Feuer, Funkeln, Prisma) und eigene Themen speichern.
   > - **Zeitpläne pro Lampe & Raum:** Wahlweise **nativ auf der Hue Bridge** (läuft auch im Ruhezustand) oder **live auf dem Mac** — mit Uhrzeit, Sonnenauf-/-untergang, Wochentagen & sanftem Überblenden.
-  > - **Abhängigkeits-Regeln & Mac-Automation:** „Wenn Schreibtischlampe AN → auch Monitor-Licht AN", gegenseitiges Ausschalten, Zeitfenster sowie Auslösen bei Mac-Aufwachen/Ruhezustand/Sperren.
+  > - **Abhängigkeits-Regeln, Sensoren, Bridge Pro MotionAware™ & Mac-Automation:** Verbinde Lampen, Räume, physische Hue-Bewegungs-, Kontakt- & Schaltsensoren sowie **Bridge Pro MotionAware™**-Präsenzbereiche direkt auf dem Grundriss — plus Auslösen bei Mac-Aufwachen/Ruhezustand/Sperren.
+  > - **Animierte Hilfe-Übersicht, optionales „Ask AI" (standardmäßig AUS) & lokaler MCP-Server:** Interaktive Feature-Tour über `?`; wer eine reine, KI-freie Hue-App möchte, sieht keinerlei KI-Funktionen. Optional in den Einstellungen aktivierbar (`⌘K`, offline auf Deutsch & Englisch + lokales Ollama nur auf Loopback) sowie nativer `--mcp`-Stdio-Server für lokale KI-Agenten.
   > - **Musik-Licht-Synthesizer:** Reagiert live auf gestreamte Systemmusik oder Mikrofon (Bass/Mitten/Höhen + Beat-Erkennung, Hue Entertainment v2 & Standard-Sync).
   > - **Persönlicher Stil:** 6 App-Skins (u. a. Neon Synthwave, Cozy Cabin, Retro Terminal, Disco Lava), 8 wählbare Menüleisten-Icons, abgerundete Ecken, Schriftart & -größe, globale Tastenkürzel, Apple Kurzbefehle & Siri, 8 Sprachen und eingebauter Demo-Modus.
 

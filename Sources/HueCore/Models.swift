@@ -22,6 +22,8 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
     public let mirekMax: Int
     public let effect: String
     public let availableEffects: [String]
+    public var motionAware: Bool = false
+    public var motionActive: Bool = false
 
     public init(
         id: String,
@@ -38,7 +40,9 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
         mirekMin: Int = 153,
         mirekMax: Int = 500,
         effect: String = "no_effect",
-        availableEffects: [String] = []
+        availableEffects: [String] = [],
+        motionAware: Bool = false,
+        motionActive: Bool = false
     ) {
         self.id = id
         self.deviceID = deviceID
@@ -55,6 +59,8 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
         self.mirekMax = mirekMax
         self.effect = effect
         self.availableEffects = availableEffects
+        self.motionAware = motionAware
+        self.motionActive = motionActive
     }
 
     public init(json: [String: Any]) {
@@ -76,6 +82,8 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
         let eff = JSONValue.string(json, "effect")
         effect = eff.isEmpty ? "no_effect" : eff
         availableEffects = JSONValue.strings(json, "available_effects")
+        motionAware = JSONValue.bool(json, "motion_aware")
+        motionActive = JSONValue.bool(json, "motion_active")
     }
 }
 
@@ -181,17 +189,183 @@ public struct BridgeInfo: Equatable, Hashable, Sendable {
     public let ip: String
     public let name: String
     public let model: String
+    public var modelID: String = ""
+    public var isPro: Bool = false
 
-    public init(ip: String, name: String, model: String) {
+    public init(
+        ip: String,
+        name: String,
+        model: String,
+        modelID: String = "",
+        isPro: Bool = false
+    ) {
         self.ip = ip
         self.name = name
         self.model = model
+        let resolvedModelID = modelID.isEmpty ? model : modelID
+        self.modelID = resolvedModelID
+        self.isPro = isPro || resolvedModelID.uppercased() == "BSB003"
     }
 
     /// "Name · 192.168.1.2", as in the Linux panels.
     public var text: String {
         let shown = name.isEmpty ? "Hue Bridge" : name
         return ip.isEmpty ? shown : "\(shown) · \(ip)"
+    }
+}
+
+public struct HueMotionArea: Identifiable, Codable, Equatable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var enabled: Bool
+    public var roomID: String
+    public var motion: Bool
+    public var motionValid: Bool
+    public var sensitivity: Int?
+    public var sensitivityMax: Int?
+    public var convenienceID: String
+    public var lightIDs: [String]
+    public var health: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, enabled
+        case roomID = "room_id"
+        case motion
+        case motionValid = "motion_valid"
+        case sensitivity
+        case sensitivityMax = "sensitivity_max"
+        case convenienceID = "convenience_id"
+        case lightIDs = "light_ids"
+        case health
+    }
+
+    public init(
+        id: String,
+        name: String,
+        enabled: Bool = true,
+        roomID: String = "",
+        motion: Bool = false,
+        motionValid: Bool = true,
+        sensitivity: Int? = nil,
+        sensitivityMax: Int? = nil,
+        convenienceID: String = "",
+        lightIDs: [String] = [],
+        health: String = "ready"
+    ) {
+        self.id = id
+        self.name = name
+        self.enabled = enabled
+        self.roomID = roomID
+        self.motion = motion
+        self.motionValid = motionValid
+        self.sensitivity = sensitivity
+        self.sensitivityMax = sensitivityMax
+        self.convenienceID = convenienceID
+        self.lightIDs = lightIDs
+        self.health = health
+    }
+
+    public init(json: [String: Any]) {
+        id = JSONValue.string(json, "id")
+        name = JSONValue.string(json, "name")
+        enabled = (json["enabled"] as? Bool) ?? true
+        roomID = JSONValue.string(json, "room_id")
+        motion = JSONValue.bool(json, "motion")
+        motionValid = (json["motion_valid"] as? Bool) ?? true
+        sensitivity = JSONValue.optionalInt(json, "sensitivity")
+        sensitivityMax = JSONValue.optionalInt(json, "sensitivity_max")
+        convenienceID = JSONValue.string(json, "convenience_id")
+        lightIDs = JSONValue.strings(json, "light_ids")
+        let h = JSONValue.string(json, "health")
+        health = h.isEmpty ? "ready" : h
+    }
+}
+
+public struct HueSensor: Identifiable, Codable, Equatable, Hashable, Sendable {
+    public var id: String
+    public var deviceID: String
+    /// "motion" | "contact" | "button"
+    public var kind: String
+    public var name: String
+    public var roomID: String
+    public var enabled: Bool
+    public var motion: Bool
+    public var open: Bool
+    public var temperature: Double?
+    public var lux: Double?
+    public var battery: Int?
+    public var batteryState: String
+    public var sensitivity: Int?
+    public var sensitivityMax: Int?
+    public var buttonIDs: [String]
+    public var lastEvent: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case deviceID = "device_id"
+        case kind, name
+        case roomID = "room_id"
+        case enabled, motion, open, temperature, lux, battery
+        case batteryState = "battery_state"
+        case sensitivity
+        case sensitivityMax = "sensitivity_max"
+        case buttonIDs = "button_ids"
+        case lastEvent = "last_event"
+    }
+
+    public init(
+        id: String,
+        deviceID: String = "",
+        kind: String,
+        name: String,
+        roomID: String = "",
+        enabled: Bool = true,
+        motion: Bool = false,
+        open: Bool = false,
+        temperature: Double? = nil,
+        lux: Double? = nil,
+        battery: Int? = nil,
+        batteryState: String = "",
+        sensitivity: Int? = nil,
+        sensitivityMax: Int? = nil,
+        buttonIDs: [String] = [],
+        lastEvent: String = ""
+    ) {
+        self.id = id
+        self.deviceID = deviceID
+        self.kind = kind
+        self.name = name
+        self.roomID = roomID
+        self.enabled = enabled
+        self.motion = motion
+        self.open = open
+        self.temperature = temperature
+        self.lux = lux
+        self.battery = battery
+        self.batteryState = batteryState
+        self.sensitivity = sensitivity
+        self.sensitivityMax = sensitivityMax
+        self.buttonIDs = buttonIDs
+        self.lastEvent = lastEvent
+    }
+
+    public init(json: [String: Any]) {
+        id = JSONValue.string(json, "id")
+        deviceID = JSONValue.string(json, "device_id")
+        kind = JSONValue.string(json, "kind")
+        name = JSONValue.string(json, "name")
+        roomID = JSONValue.string(json, "room_id")
+        enabled = (json["enabled"] as? Bool) ?? true
+        motion = JSONValue.bool(json, "motion")
+        open = JSONValue.bool(json, "open")
+        temperature = HueColorMath.finite(json["temperature"], low: -50.0, high: 120.0)
+        lux = HueColorMath.finite(json["lux"], low: 0.0, high: 200_000.0)
+        battery = JSONValue.optionalInt(json, "battery")
+        batteryState = JSONValue.string(json, "battery_state")
+        sensitivity = JSONValue.optionalInt(json, "sensitivity")
+        sensitivityMax = JSONValue.optionalInt(json, "sensitivity_max")
+        buttonIDs = JSONValue.strings(json, "button_ids")
+        lastEvent = JSONValue.string(json, "last_event")
     }
 }
 
@@ -436,6 +610,8 @@ public struct HueSnapshot: Equatable, Sendable {
     public var rulesPaused: Bool
     public var ruleLog: [HueRuleLogEntry]
     public var entertainmentAreas: [HueEntertainmentArea]
+    public var motionAreas: [HueMotionArea]
+    public var sensors: [HueSensor]
     public var isDemo: Bool
 
     /// Before the first bridge state arrives: no bridge known yet, nothing on.
@@ -460,6 +636,8 @@ public struct HueSnapshot: Equatable, Sendable {
         rulesPaused: Bool = false,
         ruleLog: [HueRuleLogEntry] = [],
         entertainmentAreas: [HueEntertainmentArea] = [],
+        motionAreas: [HueMotionArea] = [],
+        sensors: [HueSensor] = [],
         isDemo: Bool = false
     ) {
         self.phase = phase.isEmpty ? "connecting" : phase
@@ -480,6 +658,8 @@ public struct HueSnapshot: Equatable, Sendable {
         self.rulesPaused = rulesPaused
         self.ruleLog = ruleLog
         self.entertainmentAreas = entertainmentAreas
+        self.motionAreas = motionAreas
+        self.sensors = sensors
         self.isDemo = isDemo
     }
 
@@ -494,8 +674,13 @@ public struct HueSnapshot: Equatable, Sendable {
             return String(describing: value)
         }
         if let b = json["bridge"] as? [String: Any], !b.isEmpty {
-            bridge = BridgeInfo(ip: JSONValue.string(b, "ip"), name: JSONValue.string(b, "name"),
-                                model: JSONValue.string(b, "model"))
+            bridge = BridgeInfo(
+                ip: JSONValue.string(b, "ip"),
+                name: JSONValue.string(b, "name"),
+                model: JSONValue.string(b, "model"),
+                modelID: JSONValue.string(b, "model_id"),
+                isPro: JSONValue.bool(b, "is_pro")
+            )
         } else {
             bridge = nil
         }
@@ -512,6 +697,8 @@ public struct HueSnapshot: Equatable, Sendable {
         rulesPaused = JSONValue.bool(json, "rules_paused")
         ruleLog = []
         entertainmentAreas = []
+        motionAreas = JSONValue.objects(json, "motion_areas").map(HueMotionArea.init(json:))
+        sensors = JSONValue.objects(json, "sensors").map(HueSensor.init(json:))
         isDemo = JSONValue.bool(json, "is_demo")
     }
 
@@ -538,6 +725,19 @@ public struct HueSnapshot: Equatable, Sendable {
             }
         }
         return nil
+    }
+
+    public func sensor(_ id: String) -> HueSensor? {
+        sensors.first { $0.id == id || $0.buttonIDs.contains(id) }
+    }
+
+    public func motionArea(_ id: String) -> HueMotionArea? {
+        motionAreas.first { $0.id == id || (!$0.convenienceID.isEmpty && $0.convenienceID == id) }
+    }
+
+    public func motionAreas(forRoom roomID: String) -> [HueMotionArea] {
+        guard !roomID.isEmpty else { return [] }
+        return motionAreas.filter { $0.roomID == roomID }
     }
 
     /// Unique lights across non-zone rooms (each light appears once).
@@ -761,6 +961,12 @@ public struct HueBuiltModel: Equatable, Sendable {
     public let schedules: [HueSchedule]
     public let entertainmentAreas: [HueEntertainmentArea]
     public let entertainmentServiceByLight: [String: String]
+    public let bridgeModelID: String
+    public let isPro: Bool
+    public let motionAreas: [HueMotionArea]
+    public let sensors: [HueSensor]
+    public let sensorServiceToSensorID: [String: String]
+    public let securityMotionToAreaID: [String: String]
 
     public init(
         rooms: [HueRoom],
@@ -770,7 +976,13 @@ public struct HueBuiltModel: Equatable, Sendable {
         scheduleScriptID: String,
         schedules: [HueSchedule],
         entertainmentAreas: [HueEntertainmentArea] = [],
-        entertainmentServiceByLight: [String: String] = [:]
+        entertainmentServiceByLight: [String: String] = [:],
+        bridgeModelID: String = "",
+        isPro: Bool = false,
+        motionAreas: [HueMotionArea] = [],
+        sensors: [HueSensor] = [],
+        sensorServiceToSensorID: [String: String] = [:],
+        securityMotionToAreaID: [String: String] = [:]
     ) {
         self.rooms = rooms
         self.lightCount = lightCount
@@ -780,6 +992,12 @@ public struct HueBuiltModel: Equatable, Sendable {
         self.schedules = schedules
         self.entertainmentAreas = entertainmentAreas
         self.entertainmentServiceByLight = entertainmentServiceByLight
+        self.bridgeModelID = bridgeModelID
+        self.isPro = isPro
+        self.motionAreas = motionAreas
+        self.sensors = sensors
+        self.sensorServiceToSensorID = sensorServiceToSensorID
+        self.securityMotionToAreaID = securityMotionToAreaID
     }
 }
 
@@ -844,6 +1062,9 @@ public enum HueModelBuilder {
             return HueColorMath.defaultWarmHex
         }
 
+        var motionAwareLights = Set<String>()
+        var motionActiveLights = Set<String>()
+
         func makeLight(_ light: [String: Any]) -> HueLight {
             let id = light["id"] as? String ?? ""
             let meta = light["metadata"] as? [String: Any] ?? [:]
@@ -884,7 +1105,9 @@ public enum HueModelBuilder {
                 mirekMin: min(mirekMin, mirekMax),
                 mirekMax: max(mirekMin, mirekMax),
                 effect: currentEffect.isEmpty ? "no_effect" : currentEffect,
-                availableEffects: availableEffects
+                availableEffects: availableEffects,
+                motionAware: motionAwareLights.contains(id),
+                motionActive: motionActiveLights.contains(id)
             )
         }
 
@@ -916,6 +1139,388 @@ public enum HueModelBuilder {
                     entertainmentServiceByLight[lid] = entID
                 }
             }
+        }
+
+        // Detect Hue Bridge model_id (Bridge Pro = BSB003) from the bridge device
+        var bridgeModelID = ""
+        var bridgeDeviceIDs = Set<String>()
+        for br in byType["bridge"] ?? [] {
+            if let owner = (br["owner"] as? [String: Any])?["rid"] as? String {
+                bridgeDeviceIDs.insert(owner)
+            }
+        }
+        for (did, device) in devices {
+            let pdata = device["product_data"] as? [String: Any] ?? [:]
+            let mid = HueColorMath.clean((pdata["model_id"] as? String) ?? "", limit: 30)
+            if bridgeDeviceIDs.contains(did) && !mid.isEmpty {
+                bridgeModelID = mid
+                break
+            }
+            if bridgeModelID.isEmpty && mid.uppercased().hasPrefix("BSB") {
+                bridgeModelID = mid
+            }
+        }
+
+        // Bridge Pro MotionAware™: motion_area_candidate, convenience_area_motion, security_area_motion, motion_area_configuration
+        var candidateLights: [String: [String]] = [:]
+        for cand in byType["motion_area_candidate"] ?? [] {
+            guard let cid = cand["id"] as? String, HueColorMath.validUUID(cid) else { continue }
+            var found: [String] = []
+            if let owner = cand["owner"] as? [String: Any],
+               let rid = owner["rid"] as? String,
+               let rtype = owner["rtype"] as? String {
+                if rtype == "device" {
+                    found.append(contentsOf: deviceLights[rid] ?? [])
+                } else if rtype == "light", lights[rid] != nil {
+                    found.append(rid)
+                }
+            }
+            if found.isEmpty {
+                for svc in (cand["services"] as? [[String: Any]]) ?? [] {
+                    if let rid = svc["rid"] as? String, let rtype = svc["rtype"] as? String {
+                        if rtype == "light", lights[rid] != nil {
+                            found.append(rid)
+                        } else if rtype == "device" {
+                            found.append(contentsOf: deviceLights[rid] ?? [])
+                        }
+                    }
+                }
+            }
+            candidateLights[cid] = found
+        }
+
+        var convenienceByID: [String: [String: Any]] = [:]
+        var convenienceByConfigID: [String: String] = [:]
+        for conv in byType["convenience_area_motion"] ?? [] {
+            guard let cid = conv["id"] as? String, HueColorMath.validUUID(cid) else { continue }
+            convenienceByID[cid] = conv
+            if let owner = (conv["owner"] as? [String: Any])?["rid"] as? String, HueColorMath.validUUID(owner) {
+                convenienceByConfigID[owner] = cid
+            }
+        }
+
+        var securityByID: [String: [String: Any]] = [:]
+        var securityByConfigID: [String: String] = [:]
+        var securityMotionToAreaID: [String: String] = [:]
+        for sec in byType["security_area_motion"] ?? [] {
+            guard let sid = sec["id"] as? String, HueColorMath.validUUID(sid) else { continue }
+            securityByID[sid] = sec
+            if let owner = (sec["owner"] as? [String: Any])?["rid"] as? String, HueColorMath.validUUID(owner) {
+                securityByConfigID[owner] = sid
+                securityMotionToAreaID[sid] = owner
+            }
+        }
+
+        func parseSensitivity(_ dict: [String: Any]?) -> (Int?, Int?) {
+            guard let dict = dict else { return (nil, nil) }
+            if let sDict = dict["sensitivity"] as? [String: Any] {
+                return (JSONValue.optionalInt(sDict, "sensitivity"), JSONValue.optionalInt(sDict, "sensitivity_max"))
+            }
+            if let sDict = dict["motion_area_sensitivity"] as? [String: Any] {
+                return (JSONValue.optionalInt(sDict, "sensitivity"), JSONValue.optionalInt(sDict, "sensitivity_max"))
+            }
+            if let val = JSONValue.optionalInt(dict, "sensitivity") {
+                return (val, JSONValue.optionalInt(dict, "sensitivity_max"))
+            }
+            return (nil, nil)
+        }
+
+        func parseMotionFlag(_ dict: [String: Any]?) -> (motion: Bool?, valid: Bool?) {
+            guard let mDict = dict?["motion"] as? [String: Any] else { return (nil, nil) }
+            let val = (mDict["motion"] as? Bool) ?? ((mDict["motion_report"] as? [String: Any])?["motion"] as? Bool)
+            let valid = mDict["motion_valid"] as? Bool
+            return (val, valid)
+        }
+
+        var motionAreas: [HueMotionArea] = []
+        for cfg in byType["motion_area_configuration"] ?? [] {
+            guard let cfgID = cfg["id"] as? String, HueColorMath.validUUID(cfgID) else { continue }
+            let meta = cfg["metadata"] as? [String: Any] ?? [:]
+            let rawName = HueColorMath.clean((cfg["name"] as? String) ?? (meta["name"] as? String) ?? "MotionAware")
+            let areaName = rawName.isEmpty ? "MotionAware" : rawName
+            let enabled = (cfg["enabled"] as? Bool) ?? true
+
+            var roomID = ""
+            if let group = cfg["group"] as? [String: Any], let rid = group["rid"] as? String, HueColorMath.validUUID(rid) {
+                roomID = rid
+            } else if let room = cfg["room"] as? [String: Any], let rid = room["rid"] as? String, HueColorMath.validUUID(rid) {
+                roomID = rid
+            } else if let whereList = cfg["where"] as? [[String: Any]], let first = whereList.first {
+                let g = (first["group"] as? [String: Any]) ?? first
+                if let rid = g["rid"] as? String, HueColorMath.validUUID(rid) {
+                    roomID = rid
+                }
+            }
+
+            let convID = ((cfg["convenience_area_motion"] as? [String: Any])?["rid"] as? String)
+                ?? convenienceByConfigID[cfgID] ?? ""
+            let secID = ((cfg["security_area_motion"] as? [String: Any])?["rid"] as? String)
+                ?? securityByConfigID[cfgID] ?? ""
+            if !secID.isEmpty {
+                securityMotionToAreaID[secID] = cfgID
+            }
+
+            let conv = convenienceByID[convID]
+            let sec = securityByID[secID]
+            let convMotion = parseMotionFlag(conv)
+            let secMotion = parseMotionFlag(sec)
+            let cfgMotion = parseMotionFlag(cfg)
+            let isMotion = convMotion.motion ?? secMotion.motion ?? cfgMotion.motion ?? false
+            let isValid = convMotion.valid ?? secMotion.valid ?? cfgMotion.valid ?? true
+
+            let cfgSens = parseSensitivity(cfg)
+            let convSens = parseSensitivity(conv)
+            let sensitivity = cfgSens.0 ?? convSens.0
+            let sensitivityMax = cfgSens.1 ?? convSens.1 ?? (sensitivity != nil ? 4 : nil)
+
+            let rawHealth = HueColorMath.clean((cfg["status"] as? String) ?? (cfg["health"] as? String) ?? "ready", limit: 30)
+            let health = rawHealth.isEmpty ? "ready" : rawHealth
+
+            var areaLightIDs: [String] = []
+            var seenAreaLights = Set<String>()
+            let participants = (cfg["participants"] as? [[String: Any]])
+                ?? (cfg["motion_area_participants"] as? [[String: Any]])
+                ?? []
+            for p in participants {
+                let target = (p["service"] as? [String: Any]) ?? p
+                guard let rid = target["rid"] as? String, let rtype = target["rtype"] as? String else { continue }
+                let resolved: [String]
+                if rtype == "motion_area_candidate" {
+                    resolved = candidateLights[rid] ?? []
+                } else if rtype == "device" {
+                    resolved = deviceLights[rid] ?? []
+                } else if rtype == "light", lights[rid] != nil {
+                    resolved = [rid]
+                } else {
+                    resolved = []
+                }
+                for lid in resolved where seenAreaLights.insert(lid).inserted {
+                    areaLightIDs.append(lid)
+                }
+            }
+
+            for lid in areaLightIDs {
+                motionAwareLights.insert(lid)
+                if enabled && isMotion {
+                    motionActiveLights.insert(lid)
+                }
+            }
+
+            motionAreas.append(HueMotionArea(
+                id: cfgID,
+                name: areaName,
+                enabled: enabled,
+                roomID: roomID,
+                motion: isMotion,
+                motionValid: isValid,
+                sensitivity: sensitivity,
+                sensitivityMax: sensitivityMax,
+                convenienceID: convID,
+                lightIDs: areaLightIDs,
+                health: health
+            ))
+        }
+        motionAreas.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let isPro = bridgeModelID.uppercased() == "BSB003" || !motionAreas.isEmpty
+
+        // Physical Hue Sensors (motion, contact, button grouped per device + temperature, light_level, device_power)
+        var roomByDeviceID: [String: String] = [:]
+        for group in byType["room"] ?? [] {
+            guard let gid = group["id"] as? String, HueColorMath.validUUID(gid) else { continue }
+            for child in (group["children"] as? [[String: Any]]) ?? [] {
+                if (child["rtype"] as? String) == "device",
+                   let rid = child["rid"] as? String,
+                   HueColorMath.validUUID(rid) {
+                    roomByDeviceID[rid] = gid
+                }
+            }
+        }
+
+        var tempByDevice: [String: Double] = [:]
+        var auxServicesByDevice: [String: [String]] = [:]
+        for tRes in byType["temperature"] ?? [] {
+            guard let tid = tRes["id"] as? String, HueColorMath.validUUID(tid),
+                  let devID = (tRes["owner"] as? [String: Any])?["rid"] as? String,
+                  HueColorMath.validUUID(devID) else { continue }
+            auxServicesByDevice[devID, default: []].append(tid)
+            if let tDict = tRes["temperature"] as? [String: Any] {
+                let raw = tDict["temperature"] ?? (tDict["temperature_report"] as? [String: Any])?["temperature"]
+                if let val = HueColorMath.finite(raw, low: -50.0, high: 120.0) {
+                    tempByDevice[devID] = (val * 10.0).rounded() / 10.0
+                }
+            }
+        }
+
+        var luxByDevice: [String: Double] = [:]
+        for llRes in byType["light_level"] ?? [] {
+            guard let llid = llRes["id"] as? String, HueColorMath.validUUID(llid),
+                  let devID = (llRes["owner"] as? [String: Any])?["rid"] as? String,
+                  HueColorMath.validUUID(devID) else { continue }
+            auxServicesByDevice[devID, default: []].append(llid)
+            if let lDict = llRes["light"] as? [String: Any] {
+                let raw = lDict["light_level"] ?? (lDict["light_level_report"] as? [String: Any])?["light_level"]
+                if let ll = HueColorMath.finite(raw, low: 0.0, high: 65535.0) {
+                    if ll <= 0 {
+                        luxByDevice[devID] = 0.0
+                    } else {
+                        let val = pow(10.0, (ll - 1.0) / 10000.0)
+                        luxByDevice[devID] = (val * 10.0).rounded() / 10.0
+                    }
+                }
+            }
+        }
+
+        var powerByDevice: [String: (level: Int?, state: String)] = [:]
+        for dpRes in byType["device_power"] ?? [] {
+            guard let dpid = dpRes["id"] as? String, HueColorMath.validUUID(dpid),
+                  let devID = (dpRes["owner"] as? [String: Any])?["rid"] as? String,
+                  HueColorMath.validUUID(devID) else { continue }
+            auxServicesByDevice[devID, default: []].append(dpid)
+            if let pState = dpRes["power_state"] as? [String: Any] {
+                let lvl = JSONValue.optionalInt(pState, "battery_level").map { HueColorMath.clamp($0, 0, 100) }
+                let st = HueColorMath.clean((pState["battery_state"] as? String) ?? "", limit: 24)
+                powerByDevice[devID] = (lvl, st)
+            }
+        }
+
+        func sensorDeviceName(_ deviceID: String, fallback: String) -> String {
+            if let dev = devices[deviceID] {
+                if let meta = dev["metadata"] as? [String: Any], let n = meta["name"] as? String {
+                    let clean = HueColorMath.clean(n)
+                    if !clean.isEmpty { return clean }
+                }
+                if let pd = dev["product_data"] as? [String: Any], let pn = pd["product_name"] as? String {
+                    let clean = HueColorMath.clean(pn)
+                    if !clean.isEmpty { return clean }
+                }
+            }
+            return fallback
+        }
+
+        var sensors: [HueSensor] = []
+        var sensorServiceToSensorID: [String: String] = [:]
+
+        for mRes in byType["motion"] ?? [] {
+            guard let mid = mRes["id"] as? String, HueColorMath.validUUID(mid) else { continue }
+            let devID = (mRes["owner"] as? [String: Any])?["rid"] as? String ?? ""
+            let enabled = (mRes["enabled"] as? Bool) ?? true
+            let mFlag = parseMotionFlag(mRes).motion ?? false
+            let sens = parseSensitivity(mRes)
+            let power = powerByDevice[devID]
+            let sensor = HueSensor(
+                id: mid,
+                deviceID: devID,
+                kind: "motion",
+                name: sensorDeviceName(devID, fallback: "Motion Sensor"),
+                roomID: roomByDeviceID[devID] ?? "",
+                enabled: enabled,
+                motion: mFlag,
+                open: false,
+                temperature: tempByDevice[devID],
+                lux: luxByDevice[devID],
+                battery: power?.level,
+                batteryState: power?.state ?? "",
+                sensitivity: sens.0,
+                sensitivityMax: sens.1,
+                buttonIDs: [],
+                lastEvent: ""
+            )
+            sensors.append(sensor)
+            sensorServiceToSensorID[mid] = mid
+            for auxID in auxServicesByDevice[devID] ?? [] {
+                sensorServiceToSensorID[auxID] = mid
+            }
+        }
+
+        for cRes in byType["contact"] ?? [] {
+            guard let cid = cRes["id"] as? String, HueColorMath.validUUID(cid) else { continue }
+            let devID = (cRes["owner"] as? [String: Any])?["rid"] as? String ?? ""
+            let enabled = (cRes["enabled"] as? Bool) ?? true
+            let state = ((cRes["contact_report"] as? [String: Any])?["state"] as? String) ?? ""
+            let isOpen = (state == "no_contact")
+            let power = powerByDevice[devID]
+            let sensor = HueSensor(
+                id: cid,
+                deviceID: devID,
+                kind: "contact",
+                name: sensorDeviceName(devID, fallback: "Contact Sensor"),
+                roomID: roomByDeviceID[devID] ?? "",
+                enabled: enabled,
+                motion: false,
+                open: isOpen,
+                temperature: tempByDevice[devID],
+                lux: luxByDevice[devID],
+                battery: power?.level,
+                batteryState: power?.state ?? "",
+                sensitivity: nil,
+                sensitivityMax: nil,
+                buttonIDs: [],
+                lastEvent: ""
+            )
+            sensors.append(sensor)
+            sensorServiceToSensorID[cid] = cid
+            for auxID in auxServicesByDevice[devID] ?? [] {
+                sensorServiceToSensorID[auxID] = cid
+            }
+        }
+
+        var buttonsByDevice: [String: [[String: Any]]] = [:]
+        for bRes in byType["button"] ?? [] {
+            guard let bid = bRes["id"] as? String, HueColorMath.validUUID(bid) else { continue }
+            let devID = (bRes["owner"] as? [String: Any])?["rid"] as? String ?? bid
+            buttonsByDevice[devID, default: []].append(bRes)
+        }
+        for (devID, btnList) in buttonsByDevice {
+            let sorted = btnList.sorted { lhs, rhs in
+                let lc = JSONValue.optionalInt((lhs["metadata"] as? [String: Any]) ?? [:], "control_id") ?? 999
+                let rc = JSONValue.optionalInt((rhs["metadata"] as? [String: Any]) ?? [:], "control_id") ?? 999
+                if lc != rc { return lc < rc }
+                return ((lhs["id"] as? String) ?? "") < ((rhs["id"] as? String) ?? "")
+            }
+            guard let primaryID = sorted.first?["id"] as? String else { continue }
+            let allIDs = sorted.compactMap { $0["id"] as? String }
+            var lastEvent = ""
+            for b in sorted {
+                if let bDict = b["button"] as? [String: Any] {
+                    if let rep = bDict["button_report"] as? [String: Any], let ev = rep["event"] as? String, !ev.isEmpty {
+                        lastEvent = ev
+                        break
+                    } else if let ev = bDict["last_event"] as? String, !ev.isEmpty {
+                        lastEvent = ev
+                        break
+                    }
+                }
+            }
+            let power = powerByDevice[devID]
+            let sensor = HueSensor(
+                id: primaryID,
+                deviceID: devID,
+                kind: "button",
+                name: sensorDeviceName(devID, fallback: "Switch"),
+                roomID: roomByDeviceID[devID] ?? "",
+                enabled: true,
+                motion: false,
+                open: false,
+                temperature: tempByDevice[devID],
+                lux: luxByDevice[devID],
+                battery: power?.level,
+                batteryState: power?.state ?? "",
+                sensitivity: nil,
+                sensitivityMax: nil,
+                buttonIDs: allIDs,
+                lastEvent: lastEvent
+            )
+            sensors.append(sensor)
+            for bid in allIDs {
+                sensorServiceToSensorID[bid] = primaryID
+            }
+            for auxID in auxServicesByDevice[devID] ?? [] {
+                sensorServiceToSensorID[auxID] = primaryID
+            }
+        }
+        sensors.sort {
+            let cmp = $0.name.localizedCaseInsensitiveCompare($1.name)
+            return cmp == .orderedSame ? ($0.id < $1.id) : (cmp == .orderedAscending)
         }
 
         var budget = maxMemberships
@@ -1233,7 +1838,13 @@ public enum HueModelBuilder {
             scheduleScriptID: scheduleScriptID,
             schedules: schedules,
             entertainmentAreas: entertainmentAreas,
-            entertainmentServiceByLight: entertainmentServiceByLight
+            entertainmentServiceByLight: entertainmentServiceByLight,
+            bridgeModelID: bridgeModelID,
+            isPro: isPro,
+            motionAreas: motionAreas,
+            sensors: sensors,
+            sensorServiceToSensorID: sensorServiceToSensorID,
+            securityMotionToAreaID: securityMotionToAreaID
         )
     }
 }

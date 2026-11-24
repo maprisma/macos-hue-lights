@@ -111,4 +111,8 @@ public protocol HueBridgeControlling: AnyObject {
     /// Bridge credentials for optional Entertainment v2 DTLS streaming (nil in Demo Mode or unpaired).
     var entertainmentCredentials: BridgeCredentials? { get }
     func setEntertainmentActive(areaID: String, active: Bool) async -> Bool
+
+    // Physical Hue sensors & Bridge Pro MotionAware™ controls
+    func setSensorEnabled(kind: String, id: String, enabled: Bool)
+    func updateMotionArea(id: String, convenienceID: String?, enabled: Bool?, sensitivity: Int?)
 }

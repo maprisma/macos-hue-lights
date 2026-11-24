@@ -17,6 +17,11 @@ public final class DemoBridgeClient: HueBridgeControlling {
     public static let deskLampID = "30000000-0000-0000-0000-000000000004"
     public static let monitorBacklightID = "30000000-0000-0000-0000-000000000005"
 
+    public static let livingMotionAreaID = "90000000-0000-0000-0000-000000000001"
+    public static let livingConvenienceID = "91000000-0000-0000-0000-000000000001"
+    public static let hallwayMotionSensorID = "92000000-0000-0000-0000-000000000001"
+    public static let frontDoorContactSensorID = "93000000-0000-0000-0000-000000000001"
+
     public var onSnapshot: ((HueSnapshot) -> Void)?
     public var bridgeID: String { "demo" }
     public private(set) var entertainmentPositions: [String: [String: (Double, Double, Double)]] = [:]
@@ -37,13 +42,15 @@ public final class DemoBridgeClient: HueBridgeControlling {
         var mirekMax: Int
         var effect: String
         var availableEffects: [String]
+        var motionAware: Bool = false
+        var motionActive: Bool = false
 
         func toModel() -> HueLight {
             HueLight(
                 id: id, deviceID: deviceID, name: name, on: on, bri: bri, dimmable: dimmable, color: color,
                 reachable: reachable, supportsColor: supportsColor, supportsCT: supportsCT,
                 mirek: mirek, mirekMin: mirekMin, mirekMax: mirekMax, effect: effect,
-                availableEffects: availableEffects
+                availableEffects: availableEffects, motionAware: motionAware, motionActive: motionActive
             )
         }
     }
@@ -68,6 +75,8 @@ public final class DemoBridgeClient: HueBridgeControlling {
 
     private var rooms: [MutableRoom]
     private var schedules: [HueSchedule]
+    private var motionAreas: [HueMotionArea]
+    private var sensors: [HueSensor]
     private let ruleEngine: RuleEngine
 
     public init(now: @escaping () -> Date = Date.init) {
@@ -86,7 +95,8 @@ public final class DemoBridgeClient: HueBridgeControlling {
                         on: true, bri: 80, dimmable: true,
                         color: HueColorMath.mirekToHex(320), reachable: true,
                         supportsColor: true, supportsCT: true, mirek: 320, mirekMin: 153, mirekMax: 500,
-                        effect: "no_effect", availableEffects: ["candle", "fire", "prism", "sparkle"]
+                        effect: "no_effect", availableEffects: ["candle", "fire", "prism", "sparkle"],
+                        motionAware: true, motionActive: true
                     ),
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000002",
@@ -95,7 +105,8 @@ public final class DemoBridgeClient: HueBridgeControlling {
                         on: true, bri: 55, dimmable: true,
                         color: "#ffaa44", reachable: true,
                         supportsColor: true, supportsCT: true, mirek: 400, mirekMin: 153, mirekMax: 500,
-                        effect: "candle", availableEffects: ["candle", "fire", "opal", "glisten"]
+                        effect: "candle", availableEffects: ["candle", "fire", "opal", "glisten"],
+                        motionAware: true, motionActive: true
                     ),
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000003",
@@ -104,7 +115,8 @@ public final class DemoBridgeClient: HueBridgeControlling {
                         on: false, bri: 40, dimmable: true,
                         color: "#6677ff", reachable: true,
                         supportsColor: true, supportsCT: true, mirek: 250, mirekMin: 153, mirekMax: 500,
-                        effect: "no_effect", availableEffects: ["prism", "sparkle", "underwater"]
+                        effect: "no_effect", availableEffects: ["prism", "sparkle", "underwater"],
+                        motionAware: true, motionActive: true
                     ),
                 ],
                 scenes: [
@@ -268,6 +280,65 @@ public final class DemoBridgeClient: HueBridgeControlling {
                 targets: [HueRuleTarget(kind: "room", id: Self.officeRoomID, action: "off")]
             ),
         ]
+        self.motionAreas = [
+            HueMotionArea(
+                id: Self.livingMotionAreaID,
+                name: "Living Room MotionAware",
+                enabled: true,
+                roomID: Self.livingRoomID,
+                motion: true,
+                motionValid: true,
+                sensitivity: 3,
+                sensitivityMax: 4,
+                convenienceID: Self.livingConvenienceID,
+                lightIDs: [
+                    "30000000-0000-0000-0000-000000000001",
+                    "30000000-0000-0000-0000-000000000002",
+                    "30000000-0000-0000-0000-000000000003",
+                ],
+                health: "ready"
+            ),
+        ]
+
+        self.sensors = [
+            HueSensor(
+                id: Self.frontDoorContactSensorID,
+                deviceID: "94000000-0000-0000-0000-000000000002",
+                kind: "contact",
+                name: "Front Door Contact",
+                roomID: Self.hallwayRoomID,
+                enabled: true,
+                motion: false,
+                open: false,
+                temperature: nil,
+                lux: nil,
+                battery: 94,
+                batteryState: "normal",
+                sensitivity: nil,
+                sensitivityMax: nil,
+                buttonIDs: [],
+                lastEvent: ""
+            ),
+            HueSensor(
+                id: Self.hallwayMotionSensorID,
+                deviceID: "94000000-0000-0000-0000-000000000001",
+                kind: "motion",
+                name: "Hallway Motion",
+                roomID: Self.hallwayRoomID,
+                enabled: true,
+                motion: false,
+                open: false,
+                temperature: 21.4,
+                lux: 42.0,
+                battery: 88,
+                batteryState: "normal",
+                sensitivity: 2,
+                sensitivityMax: 4,
+                buttonIDs: [],
+                lastEvent: ""
+            ),
+        ]
+
         self.ruleEngine = RuleEngine(rules: defaultRules, paused: false, now: now)
     }
 
@@ -449,6 +520,63 @@ public final class DemoBridgeClient: HueBridgeControlling {
 
     public func setEntertainmentActive(areaID: String, active: Bool) async -> Bool {
         false
+    }
+
+    // MARK: - Sensors & Bridge Pro MotionAware™ (In-Memory Demo)
+
+    public func setSensorEnabled(kind: String, id: String, enabled: Bool) {
+        guard let idx = sensors.firstIndex(where: { $0.id == id && $0.kind == kind }) else { return }
+        sensors[idx].enabled = enabled
+        if !enabled {
+            sensors[idx].motion = false
+        }
+        emit()
+    }
+
+    public func updateMotionArea(id: String, convenienceID: String?, enabled: Bool?, sensitivity: Int?) {
+        guard let idx = motionAreas.firstIndex(where: { $0.id == id || (convenienceID != nil && $0.convenienceID == convenienceID) }) else { return }
+        if let enabled = enabled {
+            motionAreas[idx].enabled = enabled
+        }
+        if let sensitivity = sensitivity {
+            let maxVal = motionAreas[idx].sensitivityMax ?? 4
+            motionAreas[idx].sensitivity = HueColorMath.clamp(sensitivity, 0, maxVal)
+        }
+        syncMotionActiveLights()
+        emit()
+    }
+
+    public func simulateSensorEvent(kind: String, id: String, state: String) {
+        let normalized = state.lowercased()
+        if kind == "motion_area", let idx = motionAreas.firstIndex(where: { $0.id == id }) {
+            motionAreas[idx].motion = (normalized == "motion")
+            syncMotionActiveLights()
+        } else if let idx = sensors.firstIndex(where: { $0.id == id && $0.kind == kind }) {
+            if kind == "motion" {
+                sensors[idx].motion = (normalized == "motion")
+            } else if kind == "contact" {
+                sensors[idx].open = (normalized == "open")
+            } else if kind == "button" {
+                sensors[idx].lastEvent = normalized
+            }
+        }
+        let snap = buildSnapshot()
+        let actions = ruleEngine.evaluateSensorEvent(kind: kind, id: id, state: normalized, snapshot: snap)
+        executeRuleActions(actions, depth: 1)
+        emit()
+    }
+
+    private func syncMotionActiveLights() {
+        var activeIDs = Set<String>()
+        for area in motionAreas where area.enabled && area.motion {
+            activeIDs.formUnion(area.lightIDs)
+        }
+        for rIdx in rooms.indices {
+            for lIdx in rooms[rIdx].lights.indices {
+                let lid = rooms[rIdx].lights[lIdx].id
+                rooms[rIdx].lights[lIdx].motionActive = activeIDs.contains(lid)
+            }
+        }
     }
 
     // MARK: - Two-Way Spatial & Organization Mutations (In-Memory Demo)
@@ -704,7 +832,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
             error: "",
             errorCode: "",
             errorArgs: [],
-            bridge: BridgeInfo(ip: "Demo Mode", name: "Demo Hue Bridge", model: "BSB002"),
+            bridge: BridgeInfo(ip: "Demo Mode", name: "Demo Hue Bridge Pro", model: "BSB003", modelID: "BSB003", isPro: true),
             rooms: builtRooms,
             lightCount: totalLights,
             onCount: totalOn,
@@ -728,6 +856,8 @@ public final class DemoBridgeClient: HueBridgeControlling {
                     ]
                 ),
             ],
+            motionAreas: motionAreas,
+            sensors: sensors,
             isDemo: true
         )
     }

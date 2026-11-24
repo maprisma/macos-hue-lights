@@ -125,6 +125,8 @@ struct RulesView: View {
         .sheet(isPresented: $store.showNewRuleSheet) {
             NewRuleSheet(prefill: store.rulePrefillTrigger)
                 .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .preferredColorScheme(store.preferredColorScheme)
         }
     }
 
@@ -207,11 +209,11 @@ private struct RuleCard: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+                .fill(store.cardBackgroundColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(store.cardBorderColor, lineWidth: 1)
         )
         .opacity(rule.enabled && !store.rulesPaused ? 1 : 0.65)
     }
@@ -222,11 +224,15 @@ private struct RuleCard: View {
         case "exclusive": return .orange
         case "desktop": return .purple
         case "companion": return .teal
-        default: return .accentColor
+        default: return store.skinAccentColor
         }
     }
 
     private var kindSymbol: String {
+        if rule.triggerKind == "motion_area" { return "dot.radiowaves.left.and.right" }
+        if rule.triggerKind == "motion" { return "figure.walk" }
+        if rule.triggerKind == "contact" { return "door.left.hand.open" }
+        if rule.triggerKind == "button" { return "switch.2" }
         switch rule.kind {
         case "exclusive": return "arrow.left.arrow.right"
         case "desktop": return "laptopcomputer"
@@ -256,7 +262,17 @@ private struct RuleCard: View {
             return store.trf("When {0} → {1}", [trig, targetNames])
         }
         let trigName = store.nameForTarget(kind: rule.triggerKind, id: rule.triggerID)
-        let trigState = rule.triggerState == "off" ? store.tr("turns off") : store.tr("turns on")
+        let trigState: String
+        switch rule.triggerKind {
+        case "motion", "motion_area":
+            trigState = rule.triggerState == "clear" ? store.tr("no motion") : store.tr("detects motion")
+        case "contact":
+            trigState = rule.triggerState == "closed" ? store.tr("closes") : store.tr("opens")
+        case "button":
+            trigState = rule.triggerState == "long_press" ? store.tr("long pressed") : store.tr("pressed")
+        default:
+            trigState = rule.triggerState == "off" ? store.tr("turns off") : store.tr("turns on")
+        }
         return store.trf("When {0} {1} → {2}", [trigName, trigState, targetNames])
     }
 
@@ -314,6 +330,50 @@ private struct NewRuleSheet: View {
             ))
         }
         return opts
+    }
+
+    private var triggerOptions: [RuleEntityOption] {
+        var opts = entityOptions
+        for area in store.snapshot.motionAreas {
+            opts.append(RuleEntityOption(
+                key: "motion_area:\(area.id)",
+                kind: "motion_area",
+                entityID: area.id,
+                label: "\(area.name) (\(store.tr("MotionAware™")))"
+            ))
+        }
+        for sensor in store.snapshot.sensors {
+            let kindTag: String
+            switch sensor.kind {
+            case "contact": kindTag = store.tr("Contact")
+            case "button": kindTag = store.tr("Switch")
+            default: kindTag = store.tr("Motion")
+            }
+            opts.append(RuleEntityOption(
+                key: "\(sensor.kind):\(sensor.id)",
+                kind: sensor.kind,
+                entityID: sensor.id,
+                label: "\(sensor.name) (\(kindTag))"
+            ))
+        }
+        return opts
+    }
+
+    private var selectedTriggerKind: String {
+        triggerOptions.first(where: { $0.key == triggerKey })?.kind ?? "light"
+    }
+
+    private var isSensorTrigger: Bool {
+        ["motion", "motion_area", "contact", "button"].contains(selectedTriggerKind)
+    }
+
+    private func defaultState(for kind: String) -> String {
+        switch kind {
+        case "motion", "motion_area": return "motion"
+        case "contact": return "open"
+        case "button": return "press"
+        default: return "on"
+        }
     }
 
     private var targetOptions: [RuleEntityOption] {
@@ -374,7 +434,7 @@ private struct NewRuleSheet: View {
                             .pickerStyle(.segmented)
                         } else {
                             Picker(store.tr("Trigger"), selection: $triggerKey) {
-                                ForEach(entityOptions) { opt in
+                                ForEach(triggerOptions) { opt in
                                     Text(opt.label).tag(opt.key)
                                 }
                             }
@@ -383,8 +443,20 @@ private struct NewRuleSheet: View {
 
                             if ruleKind != "exclusive" {
                                 Picker(store.tr("State"), selection: $triggerState) {
-                                    Text(store.tr("Turns on")).tag("on")
-                                    Text(store.tr("Turns off")).tag("off")
+                                    switch selectedTriggerKind {
+                                    case "motion", "motion_area":
+                                        Text(store.tr("Motion detected")).tag("motion")
+                                        Text(store.tr("No motion")).tag("clear")
+                                    case "contact":
+                                        Text(store.tr("Opens")).tag("open")
+                                        Text(store.tr("Closes")).tag("closed")
+                                    case "button":
+                                        Text(store.tr("Pressed")).tag("press")
+                                        Text(store.tr("Long press")).tag("long_press")
+                                    default:
+                                        Text(store.tr("Turns on")).tag("on")
+                                        Text(store.tr("Turns off")).tag("off")
+                                    }
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.segmented)
@@ -420,8 +492,12 @@ private struct NewRuleSheet: View {
 
                     if ruleKind == "follow" || ruleKind == "companion" {
                         VStack(alignment: .leading, spacing: 6) {
-                            Toggle(store.tr("Mirror off"), isOn: $mirrorOff)
-                            Toggle(store.tr("Match brightness"), isOn: $matchBri)
+                            if selectedTriggerKind != "button" {
+                                Toggle(store.tr("Mirror off"), isOn: $mirrorOff)
+                            }
+                            if !isSensorTrigger {
+                                Toggle(store.tr("Match brightness"), isOn: $matchBri)
+                            }
                             Toggle(store.tr("Only if target is off"), isOn: $onlyIfOff)
                         }
                         .font(store.scaledFont(12))
@@ -482,18 +558,27 @@ private struct NewRuleSheet: View {
         .onAppear {
             if let prefill = prefill {
                 let key = "\(prefill.kind):\(prefill.id)"
-                if entityOptions.contains(where: { $0.key == key }) {
+                if triggerOptions.contains(where: { $0.key == key }) {
                     triggerKey = key
+                    triggerState = defaultState(for: prefill.kind)
                 }
             }
-            if triggerKey.isEmpty, let first = entityOptions.first {
+            if triggerKey.isEmpty, let first = triggerOptions.first {
                 triggerKey = first.key
+                triggerState = defaultState(for: first.kind)
             }
             if targetKey.isEmpty, let firstTarget = targetOptions.first {
                 targetKey = firstTarget.key
             }
         }
         .onChange(of: triggerKey) { _ in
+            triggerState = defaultState(for: selectedTriggerKind)
+            if selectedTriggerKind == "button" {
+                mirrorOff = false
+            }
+            if isSensorTrigger {
+                matchBri = false
+            }
             if targetKey == triggerKey || targetKey.isEmpty {
                 targetKey = targetOptions.first?.key ?? ""
             }
@@ -523,18 +608,20 @@ private struct NewRuleSheet: View {
             )
         }
 
-        guard let trigOpt = entityOptions.first(where: { $0.key == triggerKey }) else { return nil }
+        guard let trigOpt = triggerOptions.first(where: { $0.key == triggerKey }) else { return nil }
         let finalName = title.isEmpty ? "\(trigOpt.label) → \(targetOpt.label)" : title
+        let sensorTrig = ["motion", "motion_area", "contact", "button"].contains(trigOpt.kind)
+        let activeState = defaultState(for: trigOpt.kind)
         return HueRule(
             name: finalName,
             enabled: true,
             kind: ruleKind,
             triggerKind: trigOpt.kind,
             triggerID: trigOpt.entityID,
-            triggerState: ruleKind == "exclusive" ? "on" : triggerState,
+            triggerState: ruleKind == "exclusive" ? activeState : triggerState,
             targets: [HueRuleTarget(kind: targetOpt.kind, id: targetOpt.entityID, action: finalAction)],
-            mirrorOff: (ruleKind == "follow" || ruleKind == "companion") ? mirrorOff : false,
-            matchBri: (ruleKind == "follow" || ruleKind == "companion") ? matchBri : false,
+            mirrorOff: (ruleKind == "follow" || ruleKind == "companion") && trigOpt.kind != "button" ? mirrorOff : false,
+            matchBri: (ruleKind == "follow" || ruleKind == "companion") && !sensorTrig ? matchBri : false,
             timeStart: useTimeWindow ? timeStart : "",
             timeEnd: useTimeWindow ? timeEnd : "",
             onlyIfOff: (ruleKind == "follow" || ruleKind == "companion") ? onlyIfOff : false

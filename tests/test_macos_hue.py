@@ -445,16 +445,205 @@ class SwiftAppTests(unittest.TestCase):
         self.assertIn("AppShortcutsProvider", read("Sources", "MaprismaHueLights", "HueAppIntents.swift"))
         self.assertIn("ScreenCaptureKit", read("Sources", "MaprismaHueLights", "AudioCaptureManager.swift"))
         floorplan = read("Sources", "HueCore", "Floorplan.swift")
-        for needle in ("FloorplanDocument", "FloorplanTemplate", "FloorplanBackground", "FloorplanSpatial", "entertainmentPositions"):
+        for needle in (
+            "FloorplanDocument",
+            "FloorplanTemplate",
+            "FloorplanBackground",
+            "FloorplanSpatial",
+            "FloorplanSensorPlacement",
+            "entertainmentPositions",
+        ):
             self.assertIn(needle, floorplan)
+        models = read("Sources", "HueCore", "Models.swift")
+        for needle in ("HueMotionArea", "HueSensor", "motionAware", "motionActive", "BSB003"):
+            self.assertIn(needle, models)
+        help_view = read("Sources", "MaprismaHueLights", "HelpView.swift")
+        for needle in (
+            "struct HelpView",
+            "TimelineView",
+            "MotionAware",
+            "Canvas",
+            "case lights, floorplan, rules, motionAware, schedules, synth, skins, askAI, mcpServer",
+            "Ask AI (Optional)",
+            "MCP Server for AI Agents",
+            "drawAskAIPreview",
+            "drawMCPPreview",
+        ):
+            self.assertIn(needle, help_view)
+        settings_store = read("Sources", "HueCore", "SettingsStore.swift")
+        for needle in (
+            "public var askAIEnabled: Bool = false",
+            'public var askAIOllamaURL: String = AppSettings.defaultAskAIOllamaURL',
+            'public var askAIModel: String = ""',
+            "decodeIfPresent(Bool.self, forKey: .askAIEnabled) ?? false",
+        ):
+            self.assertIn(needle, settings_store)
+        ai_mcp = read("Sources", "HueCore", "HueAIAndMCP.swift")
+        for needle in (
+            "struct HueAskAIEngine: Sendable",
+            "class HueMCPServer",
+            "validatedLocalOllamaEndpoint",
+            "#if canImport(FoundationModels)",
+            "hue://state",
+            "hue_status",
+            "hue_list_rooms",
+            "hue_list_lights",
+            "hue_list_sensors",
+            "hue_list_themes",
+            "hue_list_rules",
+            "hue_list_schedules",
+            "hue_get_floorplan",
+            "hue_set_light",
+            "hue_set_room",
+            "hue_recall_scene",
+            "hue_apply_theme",
+            "hue_all_on",
+            "hue_all_off",
+            "hue_set_sensor",
+            "hue_set_motion_area",
+            "hue_create_rule",
+            "hue_toggle_rule",
+            "hue_delete_rule",
+        ):
+            self.assertIn(needle, ai_mcp)
+        ask_view = read("Sources", "MaprismaHueLights", "AskAIView.swift")
+        for needle in ("struct AskAIView", "Optional · Local-first · Turn off anytime in Settings", "runAskAIPrompt"):
+            self.assertIn(needle, ask_view)
+        content_view = read("Sources", "MaprismaHueLights", "ContentView.swift")
+        self.assertIn("if store.askAIEnabled", content_view)
+        self.assertIn('.keyboardShortcut("k", modifiers: .command)', content_view)
+        settings_view = read("Sources", "MaprismaHueLights", "SettingsView.swift")
+        self.assertIn("Enable Ask AI", settings_view)
+        self.assertIn("if store.askAIEnabled", settings_view)
+        app_entry = read("Sources", "MaprismaHueLights", "MaprismaHueLightsApp.swift")
+        self.assertIn('CommandLine.arguments.contains("--mcp")', app_entry)
+        self.assertIn("HueMCPServer.runStdio", app_entry)
         map_view = read("Sources", "MaprismaHueLights", "MapView.swift")
-        for needle in ("MapView", "QuickSceneScheduleSheet", "QuickWireRuleSheet", "syncAllFloorplanToBridge"):
+        for needle in (
+            "MapView",
+            "MapMode",
+            "LampDialogSheet",
+            "LampBrightnessSheet",
+            "LampRenameSheet",
+            "LampIconPickerSheet",
+            "MapRuleDialogSheet",
+            "QuickSceneScheduleSheet",
+            "FloorplanSensorNodeView",
+            "dot.radiowaves.left.and.right",
+            "syncAllFloorplanToBridge",
+        ):
             self.assertIn(needle, map_view)
         # SwiftUI files must never reference unqualified BackgroundStyle (ambiguous with SwiftUI.BackgroundStyle)
         import re
         for name, text in self.swift_sources():
             if "import SwiftUI" in text:
                 self.assertIsNone(re.search(r'(?<!HueCore\.)\bBackgroundStyle\b', text), name)
+            # Ensure no macOS 14+ only SwiftUI APIs leak into macOS 13 target
+            self.assertNotIn("@Observable", text, name)
+            self.assertNotIn(".contentMargins(", text, name)
+
+    def test_swift_delimiters_balanced(self):
+        """Catch stray braces/brackets/parens in all Swift sources & tests before macOS CI builds."""
+        def check_file(path):
+            src = open(path, encoding="utf-8").read()
+            stack = []
+            pairs = {")": "(", "]": "[", "}": "{"}
+            i, n = 0, len(src)
+            while i < n:
+                ch = src[i]
+                nxt = src[i + 1] if i + 1 < n else ""
+                # Line comment
+                if ch == "/" and nxt == "/":
+                    nl = src.find("\n", i)
+                    i = n if nl == -1 else nl + 1
+                    continue
+                # Block comment (nested)
+                if ch == "/" and nxt == "*":
+                    depth = 1
+                    i += 2
+                    while i < n and depth > 0:
+                        if src[i:i + 2] == "/*":
+                            depth += 1
+                            i += 2
+                        elif src[i:i + 2] == "*/":
+                            depth -= 1
+                            i += 2
+                        else:
+                            i += 1
+                    continue
+                # Raw strings #"..."# or #"""..."""#
+                if ch == "#":
+                    hashes = 0
+                    j = i
+                    while j < n and src[j] == "#":
+                        hashes += 1
+                        j += 1
+                    if j < n and src[j] == '"':
+                        triple = src[j:j + 3] == '"""'
+                        delim = ('"""' if triple else '"') + ("#" * hashes)
+                        i = j + (3 if triple else 1)
+                        while i < n:
+                            if src.startswith(delim, i):
+                                i += len(delim)
+                                break
+                            i += 1
+                        continue
+                # Normal or multiline string literal
+                if ch == '"':
+                    triple = src[i:i + 3] == '"""'
+                    if triple:
+                        i += 3
+                        while i < n:
+                            if src[i:i + 3] == '"""':
+                                i += 3
+                                break
+                            if src[i] == "\\":
+                                i += 2
+                                continue
+                            i += 1
+                        continue
+                    i += 1
+                    while i < n:
+                        if src[i] == "\\":
+                            if i + 1 < n and src[i + 1] == "(":
+                                # String interpolation: skip matching parens conservatively
+                                i += 2
+                                interp = 1
+                                while i < n and interp > 0:
+                                    if src[i] == "(":
+                                        interp += 1
+                                    elif src[i] == ")":
+                                        interp -= 1
+                                    elif src[i] == '"':
+                                        i += 1
+                                        while i < n and src[i] != '"':
+                                            if src[i] == "\\":
+                                                i += 2
+                                                continue
+                                            i += 1
+                                    i += 1
+                                continue
+                            i += 2
+                            continue
+                        if src[i] == '"':
+                            i += 1
+                            break
+                        i += 1
+                    continue
+                if ch in "([{":
+                    stack.append((ch, i))
+                elif ch in ")]}":
+                    self.assertTrue(stack, f"Unmatched {ch} in {path}")
+                    top, _ = stack.pop()
+                    self.assertEqual(top, pairs[ch], f"Mismatched {top} vs {ch} in {path}")
+                i += 1
+            self.assertEqual(stack, [], f"Unclosed delimiters in {path}: {stack}")
+
+        for folder in ("Sources", "Tests"):
+            for base, _, files in os.walk(os.path.join(ROOT, folder)):
+                for name in files:
+                    if name.endswith(".swift"):
+                        check_file(os.path.join(base, name))
 
     def test_build_and_install_scripts(self):
         for name in ("build-mac.sh", "install-mac.sh"):

@@ -145,6 +145,99 @@ public final class RuleEngine {
         }
     }
 
+    /// Evaluates rules for a sensor or Bridge Pro MotionAware™ event.
+    /// Supported kinds and states:
+    /// - `"motion"`, `"motion_area"`: `"motion"` / `"clear"` (supports `mirrorOff`)
+    /// - `"contact"`: `"open"` / `"closed"` (supports `mirrorOff`)
+    /// - `"button"`: `"press"` / `"long_press"`
+    public func evaluateSensorEvent(
+        kind: String,
+        id: String,
+        state: String,
+        snapshot: HueSnapshot
+    ) -> [RuleAction] {
+        guard !paused else { return [] }
+        let normalized = state.lowercased()
+        let current = now()
+        var emitted: [RuleAction] = []
+
+        for rule in rules where rule.enabled {
+            guard rule.triggerKind == kind && rule.triggerID == id else { continue }
+            guard Self.isWithinTimeWindow(start: rule.timeStart, end: rule.timeEnd, at: current, calendar: calendar) else {
+                continue
+            }
+            if let last = ruleCooldowns[rule.id], current.timeIntervalSince(last) < Self.cooldownWindow {
+                continue
+            }
+
+            let ruleActions = buildSensorActions(for: rule, kind: kind, state: normalized, snapshot: snapshot)
+            if !ruleActions.isEmpty {
+                ruleCooldowns[rule.id] = current
+                for action in ruleActions {
+                    recordOutgoingAction(action, snapshot: snapshot)
+                }
+                appendLog(rule: rule, summary: Self.logMessage(rule: rule, triggerState: normalized, count: ruleActions.count), at: current)
+                emitted.append(contentsOf: ruleActions)
+            }
+        }
+        return emitted
+    }
+
+    private func buildSensorActions(
+        for rule: HueRule,
+        kind: String,
+        state: String,
+        snapshot: HueSnapshot
+    ) -> [RuleAction] {
+        var actions: [RuleAction] = []
+        let expected = rule.triggerState.lowercased()
+
+        if rule.kind == "exclusive" {
+            guard expected == state else { return [] }
+            for target in rule.targets {
+                actions.append(RuleAction(kind: target.kind, id: target.id, on: false, ruleID: rule.id, ruleName: rule.name))
+            }
+            return actions
+        }
+
+        if expected == state {
+            for target in rule.targets {
+                if rule.onlyIfOff && target.action == "on" && Self.isTargetOn(target, in: snapshot) {
+                    continue
+                }
+                if let scene = target.sceneID, !scene.isEmpty {
+                    actions.append(RuleAction(kind: "scene", id: scene, sceneID: scene, ruleID: rule.id, ruleName: rule.name))
+                } else {
+                    let desiredOn = target.action != "off"
+                    actions.append(RuleAction(
+                        kind: target.kind,
+                        id: target.id,
+                        on: desiredOn,
+                        bri: desiredOn ? target.bri : nil,
+                        ruleID: rule.id,
+                        ruleName: rule.name
+                    ))
+                }
+            }
+        } else if rule.mirrorOff {
+            let shouldMirrorOff: Bool = {
+                if (kind == "motion" || kind == "motion_area") && expected == "motion" && state == "clear" {
+                    return true
+                }
+                if kind == "contact" && expected == "open" && state == "closed" {
+                    return true
+                }
+                return false
+            }()
+            if shouldMirrorOff {
+                for target in rule.targets {
+                    actions.append(RuleAction(kind: target.kind, id: target.id, on: false, ruleID: rule.id, ruleName: rule.name))
+                }
+            }
+        }
+        return actions
+    }
+
     /// Evaluates desktop rules for `"wake"` or `"sleep"`.
     public func evaluateDesktopEvent(_ event: String, snapshot: HueSnapshot) -> [RuleAction] {
         guard !paused else { return [] }

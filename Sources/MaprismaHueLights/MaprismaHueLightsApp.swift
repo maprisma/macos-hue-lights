@@ -1,11 +1,31 @@
 import AppKit
+import Dispatch
+import Foundation
 import HueCore
 import SwiftUI
 
+/// Entrypoint that cleanly branches into the headless `--mcp` stdio JSON-RPC 2.0 server
+/// BEFORE SwiftUI / `NSApplication` starts, so AI agent invocations never open a window or steal focus.
+@main
+enum MaprismaHueLightsEntrypoint {
+    @MainActor
+    static func main() {
+        if CommandLine.arguments.contains("--mcp") {
+            let demo = CommandLine.arguments.contains("--demo")
+            Task { @MainActor in
+                await HueMCPServer.runStdio(demo: demo)
+                Foundation.exit(0)
+            }
+            dispatchMain()
+        } else {
+            MaprismaHueLightsApp.main()
+        }
+    }
+}
+
 /// Maprisma Hue Lights for macOS: a 100% pure-Swift, App Sandbox-compliant menu bar app
 /// with an optional detachable resizable window, Light Synthesizer, Light Themes, App Skins,
-/// global hotkeys, and Apple Shortcuts (`AppIntents`).
-@main
+/// global hotkeys, optional local-first Ask AI, native `--mcp` server, and Apple Shortcuts (`AppIntents`).
 struct MaprismaHueLightsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var store = HueStore.shared

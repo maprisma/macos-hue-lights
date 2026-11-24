@@ -412,6 +412,23 @@ public struct FloorplanLampPlacement: Equatable, Hashable, Codable, Sendable {
     }
 }
 
+public struct FloorplanSensorPlacement: Equatable, Hashable, Codable, Sendable {
+    public var x: Double
+    public var y: Double
+
+    public init(x: Double, y: Double) {
+        self.x = x.isFinite ? x : 0
+        self.y = y.isFinite ? y : 0
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let x = try c.decodeIfPresent(Double.self, forKey: .x) ?? 0
+        let y = try c.decodeIfPresent(Double.self, forKey: .y) ?? 0
+        self.init(x: x, y: y)
+    }
+}
+
 public struct FloorplanDocument: Equatable, Hashable, Codable, Sendable {
     public var version: Int
     public var bridgeID: String
@@ -426,6 +443,7 @@ public struct FloorplanDocument: Equatable, Hashable, Codable, Sendable {
     public var boxes: [FloorplanBox]
     public var stamps: [FloorplanStamp]
     public var lamps: [String: FloorplanLampPlacement]
+    public var sensors: [String: FloorplanSensorPlacement]
 
     /// Alias kept for clarity with the schema's `auto_sync_rooms` semantics.
     public var autoSyncRooms: Bool {
@@ -447,6 +465,7 @@ public struct FloorplanDocument: Equatable, Hashable, Codable, Sendable {
         case boxes
         case stamps
         case lamps
+        case sensors
     }
 
     public init(
@@ -462,7 +481,8 @@ public struct FloorplanDocument: Equatable, Hashable, Codable, Sendable {
         background: FloorplanBackground = .empty,
         boxes: [FloorplanBox] = [],
         stamps: [FloorplanStamp] = [],
-        lamps: [String: FloorplanLampPlacement] = [:]
+        lamps: [String: FloorplanLampPlacement] = [:],
+        sensors: [String: FloorplanSensorPlacement] = [:]
     ) {
         self.version = max(1, version)
         self.bridgeID = HueColorMath.clean(bridgeID, limit: 40)
@@ -477,6 +497,7 @@ public struct FloorplanDocument: Equatable, Hashable, Codable, Sendable {
         self.boxes = boxes
         self.stamps = stamps
         self.lamps = lamps
+        self.sensors = sensors
     }
 
     public init(from decoder: Decoder) throws {
@@ -494,6 +515,7 @@ public struct FloorplanDocument: Equatable, Hashable, Codable, Sendable {
         let boxes = try c.decodeIfPresent([FloorplanBox].self, forKey: .boxes) ?? []
         let stamps = try c.decodeIfPresent([FloorplanStamp].self, forKey: .stamps) ?? []
         let lamps = try c.decodeIfPresent([String: FloorplanLampPlacement].self, forKey: .lamps) ?? [:]
+        let sensors = try c.decodeIfPresent([String: FloorplanSensorPlacement].self, forKey: .sensors) ?? [:]
         self.init(
             version: version,
             bridgeID: bridgeID,
@@ -507,7 +529,8 @@ public struct FloorplanDocument: Equatable, Hashable, Codable, Sendable {
             background: bg,
             boxes: boxes,
             stamps: stamps,
-            lamps: lamps
+            lamps: lamps,
+            sensors: sensors
         )
     }
 
@@ -760,6 +783,7 @@ public enum FloorplanTemplate: String, CaseIterable, Identifiable, Equatable, Se
 
         let maxX = (boxes.map(\.maxX).max() ?? 1000) + 160
         let maxY = (boxes.map(\.maxY).max() ?? 700) + 160
+        let sensorPlacements = autoPlaceSensors(snapshot.sensors, into: boxes)
         return FloorplanDocument(
             bridgeID: bridgeID,
             templateID: FloorplanTemplate.autoBridge.rawValue,
@@ -767,7 +791,8 @@ public enum FloorplanTemplate: String, CaseIterable, Identifiable, Equatable, Se
             entertainmentAreaID: snapshot.entertainmentAreas.first?.id,
             boxes: boxes,
             stamps: [],
-            lamps: lamps
+            lamps: lamps,
+            sensors: sensorPlacements
         )
     }
 
@@ -836,6 +861,7 @@ public enum FloorplanTemplate: String, CaseIterable, Identifiable, Equatable, Se
 
         let maxX = (boxes.map(\.maxX).max() ?? 1200) + 160
         let maxY = (boxes.map(\.maxY).max() ?? 800) + 160
+        let sensorPlacements = autoPlaceSensors(snapshot.sensors, into: boxes)
         return FloorplanDocument(
             bridgeID: bridgeID,
             templateID: template.rawValue,
@@ -843,8 +869,27 @@ public enum FloorplanTemplate: String, CaseIterable, Identifiable, Equatable, Se
             entertainmentAreaID: snapshot.entertainmentAreas.first?.id,
             boxes: boxes,
             stamps: stamps,
-            lamps: lamps
+            lamps: lamps,
+            sensors: sensorPlacements
         )
+    }
+
+    private static func autoPlaceSensors(
+        _ sensors: [HueSensor],
+        into boxes: [FloorplanBox]
+    ) -> [String: FloorplanSensorPlacement] {
+        var placed: [String: FloorplanSensorPlacement] = [:]
+        var countByBox: [String: Int] = [:]
+        for sensor in sensors {
+            guard !sensor.roomID.isEmpty,
+                  let box = boxes.first(where: { $0.hueID == sensor.roomID }) else { continue }
+            let idx = countByBox[box.id, default: 0]
+            countByBox[box.id] = idx + 1
+            let px = HueColorMath.clamp(((box.maxX - 36.0 - Double(idx) * 42.0) / 20.0).rounded() * 20.0, box.minX + 26, box.maxX - 24)
+            let py = HueColorMath.clamp(((box.maxY - 34.0) / 20.0).rounded() * 20.0, box.minY + 46, box.maxY - 24)
+            placed[sensor.id] = FloorplanSensorPlacement(x: px, y: py)
+        }
+        return placed
     }
 
     private static func applyDeskStudioMatching(

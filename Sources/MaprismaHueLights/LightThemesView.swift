@@ -207,7 +207,7 @@ struct LightThemesSheet: View {
                                 .foregroundStyle(symbol == sym ? Color.white : Color.primary)
                                 .background(
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(symbol == sym ? Color.accentColor : Color.primary.opacity(0.08))
+                                        .fill(symbol == sym ? store.skinAccentColor : Color.primary.opacity(0.08))
                                 )
                         }
                         .buttonStyle(.plain)

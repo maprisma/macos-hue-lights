@@ -11,7 +11,7 @@ import SwiftUI
 final class HueStore: ObservableObject {
     static let shared = HueStore()
 
-    enum Page { case main, settings }
+    enum Page { case main, settings, help }
     enum MainTab: String, CaseIterable, Identifiable {
         case lights, map, schedules, rules, synth
         var id: String { rawValue }
@@ -49,6 +49,9 @@ final class HueStore: ObservableObject {
     @Published private(set) var rules: [HueRule]
     @Published private(set) var rulesPaused: Bool
     @Published private(set) var localSchedules: [HueSchedule]
+    @Published private(set) var askAIEnabled: Bool
+    @Published private(set) var askAIOllamaURL: String
+    @Published private(set) var askAIModel: String
 
     // Launch at Login (SMAppService, macOS 13+)
     @Published private(set) var launchAtLogin: Bool
@@ -60,6 +63,7 @@ final class HueStore: ObservableObject {
     @Published var showNewRuleSheet: Bool = false
     @Published var rulePrefillTrigger: (kind: String, id: String)?
     @Published var themeEditorLight: HueLight?
+    @Published var showAskAISheet: Bool = false
 
     // Visual Floorplan & Spatial Light Studio
     @Published var floorplan: FloorplanDocument = FloorplanDocument()
@@ -124,6 +128,9 @@ final class HueStore: ObservableObject {
         rules = savedRules
         rulesPaused = savedPaused
         localSchedules = settings.loadLocalSchedules()
+        askAIEnabled = settings.askAIEnabled()
+        askAIOllamaURL = settings.askAIOllamaURL()
+        askAIModel = settings.askAIModel()
         cachedWindowFrame = settings.windowFrame()
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
 
@@ -289,6 +296,10 @@ final class HueStore: ObservableObject {
         return Color.accentColor
     }
 
+    var skinSecondaryColor: Color {
+        Color(hex: skin.secondaryHex)
+    }
+
     var preferredColorScheme: ColorScheme? {
         switch appearance.backgroundStyle {
         case .system, .tinted: return nil
@@ -300,7 +311,8 @@ final class HueStore: ObservableObject {
     var windowBackground: Color {
         switch appearance.backgroundStyle {
         case .system: return Color.clear
-        case .tinted: return skinAccentColor.opacity(0.08)
+        case .tinted:
+            return skin == .minimalZen ? Color(hex: "#64748b").opacity(0.14) : skinAccentColor.opacity(0.10)
         case .dark:
             switch skin {
             case .cozyCabin: return Color(red: 0.14, green: 0.10, blue: 0.08)
@@ -315,6 +327,35 @@ final class HueStore: ObservableObject {
             case .discoLava: return Color(red: 0.15, green: 0.07, blue: 0.20)
             default: return Color(red: 0.06, green: 0.09, blue: 0.16)
             }
+        }
+    }
+
+    var cardBackgroundColor: Color {
+        let isDarkBackdrop = (appearance.backgroundStyle == .dark || appearance.backgroundStyle == .midnight)
+        switch skin {
+        case .system:
+            return Color.primary.opacity(0.05)
+        case .synthwave:
+            return isDarkBackdrop ? Color(hex: "#1f103a").opacity(0.74) : Color(hex: "#ff2e93").opacity(0.06)
+        case .cozyCabin:
+            return isDarkBackdrop ? Color(hex: "#2d1f16").opacity(0.78) : Color(hex: "#e59838").opacity(0.07)
+        case .retroTerminal:
+            return isDarkBackdrop ? Color(hex: "#0d1910").opacity(0.84) : Color(hex: "#16a34a").opacity(0.07)
+        case .discoLava:
+            return isDarkBackdrop ? Color(hex: "#2e1440").opacity(0.74) : Color(hex: "#a855f7").opacity(0.07)
+        case .minimalZen:
+            return Color(hex: "#64748b").opacity(0.10)
+        }
+    }
+
+    var cardBorderColor: Color {
+        switch skin {
+        case .system: return Color.primary.opacity(0.08)
+        case .synthwave: return Color(hex: "#00f0ff").opacity(0.28)
+        case .cozyCabin: return Color(hex: "#e59838").opacity(0.26)
+        case .retroTerminal: return Color(hex: "#33ff66").opacity(0.32)
+        case .discoLava: return Color(hex: "#ff5e7e").opacity(0.30)
+        case .minimalZen: return Color(hex: "#94a3b8").opacity(0.24)
         }
     }
 
@@ -371,6 +412,45 @@ final class HueStore: ObservableObject {
     func setConfirmAllOn(_ value: Bool) {
         confirmAllOn = value
         try? settings.setConfirmAllOn(value)
+    }
+
+    // MARK: - Optional Ask AI (OFF by default)
+
+    func setAskAIEnabled(_ enabled: Bool) {
+        askAIEnabled = enabled
+        if !enabled {
+            showAskAISheet = false
+        }
+        try? settings.setAskAIEnabled(enabled)
+    }
+
+    func setAskAIOllamaURL(_ rawURL: String) {
+        let trimmed = rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        askAIOllamaURL = trimmed.isEmpty ? AppSettings.defaultAskAIOllamaURL : trimmed
+        try? settings.setAskAIOllamaURL(askAIOllamaURL)
+    }
+
+    func setAskAIModel(_ model: String) {
+        askAIModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        try? settings.setAskAIModel(askAIModel)
+    }
+
+    func runAskAIPrompt(_ prompt: String) async -> HueAskAIResponse {
+        guard askAIEnabled else {
+            return HueAskAIResponse(reply: "", actions: [], source: "none", matched: false)
+        }
+        let engine = HueAskAIEngine()
+        let dispatcher = HueToolDispatcher(backend: self)
+        let config = HueAskAIConfig(ollamaURL: askAIOllamaURL, model: askAIModel)
+        return await engine.ask(
+            prompt,
+            snapshot: snapshot,
+            themes: allThemes,
+            config: config,
+            executor: { call in
+                await dispatcher.execute(call)
+            }
+        )
     }
 
     // MARK: - Global Hotkeys
@@ -972,10 +1052,45 @@ final class HueStore: ObservableObject {
                 return l10n.roomName(room)
             }
         }
+        if kind == "motion" || kind == "contact" || kind == "button" {
+            if let sensor = snapshot.sensor(id) {
+                return sensor.name
+            }
+        }
+        if kind == "motion_area" {
+            if let area = snapshot.motionArea(id) {
+                return area.name
+            }
+        }
         if let light = snapshot.light(id) {
             return light.name
         }
         return id
+    }
+
+    // MARK: - Sensors & Bridge Pro MotionAware™
+
+    func setSensorEnabled(_ sensor: HueSensor, enabled: Bool) {
+        client.setSensorEnabled(kind: sensor.kind, id: sensor.id, enabled: enabled)
+    }
+
+    func updateMotionArea(_ area: HueMotionArea, enabled: Bool? = nil, sensitivity: Int? = nil) {
+        client.updateMotionArea(
+            id: area.id,
+            convenienceID: area.convenienceID.isEmpty ? nil : area.convenienceID,
+            enabled: enabled,
+            sensitivity: sensitivity
+        )
+    }
+
+    func motionArea(forRoom roomID: String) -> HueMotionArea? {
+        guard !roomID.isEmpty else { return nil }
+        return snapshot.motionAreas.first { $0.roomID == roomID }
+    }
+
+    func roomHasPresence(_ roomID: String) -> Bool {
+        guard !roomID.isEmpty else { return false }
+        return snapshot.motionAreas.contains { $0.roomID == roomID && $0.enabled && $0.motion }
     }
 
     // MARK: - Bridge
@@ -1112,12 +1227,38 @@ final class HueStore: ObservableObject {
         persistFloorplan()
     }
 
+    func placeSensor(_ sensorID: String, at x: Double, y: Double) {
+        let sx = floorplan.snapped(x)
+        let sy = floorplan.snapped(y)
+        floorplan.sensors[sensorID] = FloorplanSensorPlacement(x: sx, y: sy)
+        persistFloorplan()
+    }
+
+    func moveSensor(_ sensorID: String, to x: Double, y: Double, finalize: Bool) {
+        guard var placement = floorplan.sensors[sensorID] else { return }
+        placement.x = finalize ? floorplan.snapped(x) : x
+        placement.y = finalize ? floorplan.snapped(y) : y
+        floorplan.sensors[sensorID] = placement
+        if finalize {
+            persistFloorplan()
+        }
+    }
+
+    func unplaceSensor(_ sensorID: String) {
+        floorplan.sensors.removeValue(forKey: sensorID)
+        persistFloorplan()
+    }
+
     func updateLampPlacement(_ lightID: String, z: Double? = nil, icon: LampIcon? = nil) {
         guard var placement = floorplan.lamps[lightID] else { return }
         if let z = z { placement.z = HueColorMath.clamp(z, -1.0, 1.0) }
         if let icon = icon { placement.icon = icon }
         floorplan.lamps[lightID] = placement
         persistFloorplan()
+    }
+
+    func setLampIcon(_ lightID: String, icon: LampIcon) {
+        updateLampPlacement(lightID, icon: icon)
     }
 
     func renameLight(id: String, name: String) {
@@ -1474,5 +1615,53 @@ final class HueStore: ObservableObject {
         floorplanBackgroundImage = nil
         floorplanBackgroundError = nil
         persistFloorplan()
+    }
+}
+
+extension HueStore: HueToolBackend {
+    var currentSnapshot: HueSnapshot { snapshot }
+    var currentThemes: [HueLightTheme] { allThemes }
+    var currentRules: [HueRule] { rules }
+    var currentSchedules: [HueSchedule] { allSchedules }
+    var currentFloorplan: FloorplanDocument? { floorplan }
+
+    func setLight(id: String, on: Bool?, bri: Int?, mirek: Int?, xy: (Double, Double)?, effect: String?) {
+        client.setLight(id: id, on: on, bri: bri, mirek: mirek, xy: xy, effect: effect)
+    }
+
+    func setRoom(room: HueRoom, on: Bool?, bri: Int?, mirek: Int?, xy: (Double, Double)?, effect: String?) {
+        setRoom(room, on: on, bri: bri, mirek: mirek, xy: xy, effect: effect)
+    }
+
+    func recallScene(id: String) {
+        client.recallScene(id: id)
+    }
+
+    func turnAllOn() {
+        allOn(confirmed: true)
+    }
+
+    func turnAllOff() {
+        allOff()
+    }
+
+    func setSensorEnabled(sensor: HueSensor, enabled: Bool) {
+        setSensorEnabled(sensor, enabled: enabled)
+    }
+
+    func updateMotionArea(area: HueMotionArea, enabled: Bool?, sensitivity: Int?) {
+        updateMotionArea(area, enabled: enabled, sensitivity: sensitivity)
+    }
+
+    func toggleRule(id: String, enabled: Bool) -> Bool {
+        guard let rule = rules.first(where: { $0.id == id }) else { return false }
+        toggleRule(rule, enabled: enabled)
+        return true
+    }
+
+    func deleteRule(id: String) -> Bool {
+        guard let rule = rules.first(where: { $0.id == id }) else { return false }
+        deleteRule(rule)
+        return true
     }
 }

@@ -34,6 +34,12 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     private var schedules: [HueSchedule] = []
     private var entertainmentAreas: [HueEntertainmentArea] = []
     private var entertainmentServiceByLight: [String: String] = [:]
+    private var bridgeModelID: String = ""
+    private var bridgeIsPro: Bool = false
+    private var motionAreas: [HueMotionArea] = []
+    private var sensors: [HueSensor] = []
+    private var sensorServiceToSensorID: [String: String] = [:]
+    private var securityMotionToAreaID: [String: String] = [:]
     private var candidates: [BridgeCandidate] = []
     private var discovering: Bool = false
     private var pairIP: String = ""
@@ -121,6 +127,15 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         manualRefreshTask = Task { [weak self] in
             await self?.performRefresh(credentials: creds, generation: gen)
         }
+    }
+
+    /// Awaits a single immediate bridge resource refresh and returns the updated snapshot.
+    /// Used by the headless `--mcp` stdio server so tool calls see live bridge state immediately.
+    @discardableResult
+    public func refreshNow() async -> HueSnapshot {
+        guard let creds = credentials else { return currentSnapshot() }
+        await performRefresh(credentials: creds, generation: connGeneration)
+        return currentSnapshot()
     }
 
     // MARK: - Native Bonjour Discovery (NWBrowser)
@@ -307,6 +322,12 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         schedules = []
         entertainmentAreas = []
         entertainmentServiceByLight = [:]
+        bridgeModelID = ""
+        bridgeIsPro = false
+        motionAreas = []
+        sensors = []
+        sensorServiceToSensorID = [:]
+        securityMotionToAreaID = [:]
         pairIP = ""
         pairRemaining = 0
         phase = "unpaired"
@@ -705,7 +726,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                     dimmable: light.dimmable, color: light.color, reachable: light.reachable,
                     supportsColor: light.supportsColor, supportsCT: light.supportsCT,
                     mirek: light.mirek, mirekMin: light.mirekMin, mirekMax: light.mirekMax,
-                    effect: light.effect, availableEffects: light.availableEffects
+                    effect: light.effect, availableEffects: light.availableEffects,
+                    motionAware: light.motionAware, motionActive: light.motionActive
                 )
             }
             guard changed else { return room }
@@ -1043,6 +1065,52 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         return false
     }
 
+    // MARK: - Physical Hue Sensors & Bridge Pro MotionAware™ Controls
+
+    public func setSensorEnabled(kind: String, id: String, enabled: Bool) {
+        guard (kind == "motion" || kind == "contact"), HueColorMath.validUUID(id) else { return }
+        if let idx = sensors.firstIndex(where: { $0.id == id && $0.kind == kind }) {
+            sensors[idx].enabled = enabled
+            if !enabled {
+                sensors[idx].motion = false
+            }
+            emit()
+        }
+        sendResourcePUT(kind: kind, id: id, body: ["enabled": enabled])
+    }
+
+    public func updateMotionArea(id: String, convenienceID: String?, enabled: Bool?, sensitivity: Int?) {
+        guard HueColorMath.validUUID(id) else { return }
+        var body: [String: Any] = [:]
+        if let enabled = enabled {
+            body["enabled"] = enabled
+        }
+        if let sensitivity = sensitivity {
+            let maxVal = motionAreas.first(where: { $0.id == id })?.sensitivityMax ?? 4
+            let clamped = HueColorMath.clamp(sensitivity, 0, maxVal)
+            body["sensitivity"] = ["sensitivity": clamped]
+        }
+
+        if let idx = motionAreas.firstIndex(where: { $0.id == id }) {
+            if let enabled = enabled {
+                motionAreas[idx].enabled = enabled
+            }
+            if let sensitivity = sensitivity {
+                let maxVal = motionAreas[idx].sensitivityMax ?? 4
+                motionAreas[idx].sensitivity = HueColorMath.clamp(sensitivity, 0, maxVal)
+            }
+            syncMotionAwareLightFlags()
+            emit()
+        }
+
+        if !body.isEmpty {
+            sendResourcePUT(kind: "motion_area_configuration", id: id, body: body)
+        }
+        if let enabled = enabled, let cid = convenienceID, HueColorMath.validUUID(cid) {
+            sendResourcePUT(kind: "convenience_area_motion", id: cid, body: ["enabled": enabled])
+        }
+    }
+
     private func executeRuleActions(_ actions: [RuleAction]) {
         for action in actions {
             if let sceneID = action.sceneID, !sceneID.isEmpty, HueColorMath.validUUID(sceneID) {
@@ -1105,6 +1173,14 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
             schedules = model.schedules
             entertainmentAreas = model.entertainmentAreas
             entertainmentServiceByLight = model.entertainmentServiceByLight
+            if !model.bridgeModelID.isEmpty {
+                bridgeModelID = model.bridgeModelID
+            }
+            bridgeIsPro = model.isPro || (credentials?.model.uppercased() == "BSB003")
+            motionAreas = model.motionAreas
+            sensors = model.sensors
+            sensorServiceToSensorID = model.sensorServiceToSensorID
+            securityMotionToAreaID = model.securityMotionToAreaID
             phase = "ok"
             clearError()
             emit()
@@ -1213,6 +1289,122 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                     applySceneDelta(id: update.resourceID, active: active)
                 }
 
+            case "motion":
+                if update.eventType == "add" || update.eventType == "delete" {
+                    needsFullRefresh = true
+                    continue
+                }
+                if let idx = sensorIndex(for: update) {
+                    if let m = update.motion { sensors[idx].motion = m }
+                    if let en = update.enabled { sensors[idx].enabled = en }
+                    if let sens = update.sensitivity { sensors[idx].sensitivity = sens }
+                    if let m = update.motion {
+                        let actions = ruleEngine.evaluateSensorEvent(
+                            kind: "motion",
+                            id: sensors[idx].id,
+                            state: m ? "motion" : "clear",
+                            snapshot: currentSnapshot()
+                        )
+                        ruleActions.append(contentsOf: actions)
+                    }
+                }
+
+            case "contact":
+                if update.eventType == "add" || update.eventType == "delete" {
+                    needsFullRefresh = true
+                    continue
+                }
+                if let idx = sensorIndex(for: update) {
+                    if let open = update.contactOpen { sensors[idx].open = open }
+                    if let en = update.enabled { sensors[idx].enabled = en }
+                    if let open = update.contactOpen {
+                        let actions = ruleEngine.evaluateSensorEvent(
+                            kind: "contact",
+                            id: sensors[idx].id,
+                            state: open ? "open" : "closed",
+                            snapshot: currentSnapshot()
+                        )
+                        ruleActions.append(contentsOf: actions)
+                    }
+                }
+
+            case "button":
+                if update.eventType == "add" || update.eventType == "delete" {
+                    needsFullRefresh = true
+                    continue
+                }
+                if let idx = sensorIndex(for: update), let rawEv = update.buttonEvent {
+                    sensors[idx].lastEvent = rawEv
+                    let mapped: String?
+                    switch rawEv.lowercased() {
+                    case "short_release", "press":
+                        mapped = "press"
+                    case "long_release", "long_press":
+                        mapped = "long_press"
+                    default:
+                        mapped = nil
+                    }
+                    if let state = mapped {
+                        let actions = ruleEngine.evaluateSensorEvent(
+                            kind: "button",
+                            id: sensors[idx].id,
+                            state: state,
+                            snapshot: currentSnapshot()
+                        )
+                        ruleActions.append(contentsOf: actions)
+                    }
+                }
+
+            case "temperature":
+                if let temp = update.temperature, let idx = sensorIndex(for: update) {
+                    sensors[idx].temperature = temp
+                }
+
+            case "light_level":
+                if let lux = update.lux, let idx = sensorIndex(for: update) {
+                    sensors[idx].lux = lux
+                }
+
+            case "device_power":
+                if let idx = sensorIndex(for: update) {
+                    if let bat = update.battery { sensors[idx].battery = bat }
+                    if let st = update.batteryState { sensors[idx].batteryState = st }
+                }
+
+            case "convenience_area_motion", "security_area_motion":
+                if update.eventType == "add" || update.eventType == "delete" {
+                    needsFullRefresh = true
+                    continue
+                }
+                if let idx = motionAreaIndex(for: update) {
+                    if let m = update.motion { motionAreas[idx].motion = m }
+                    if let valid = update.motionValid { motionAreas[idx].motionValid = valid }
+                    if let en = update.enabled { motionAreas[idx].enabled = en }
+                    if let sens = update.sensitivity { motionAreas[idx].sensitivity = sens }
+                    syncMotionAwareLightFlags()
+                    if let m = update.motion {
+                        let actions = ruleEngine.evaluateSensorEvent(
+                            kind: "motion_area",
+                            id: motionAreas[idx].id,
+                            state: m ? "motion" : "clear",
+                            snapshot: currentSnapshot()
+                        )
+                        ruleActions.append(contentsOf: actions)
+                    }
+                }
+
+            case "motion_area_configuration":
+                if update.eventType == "add" || update.eventType == "delete" {
+                    needsFullRefresh = true
+                    continue
+                }
+                if let idx = motionAreas.firstIndex(where: { $0.id == update.resourceID }) {
+                    if let en = update.enabled { motionAreas[idx].enabled = en }
+                    if let name = update.name { motionAreas[idx].name = name }
+                    if let sens = update.sensitivity { motionAreas[idx].sensitivity = sens }
+                    syncMotionAwareLightFlags()
+                }
+
             case "behavior_instance", "room", "zone":
                 needsFullRefresh = true
 
@@ -1227,6 +1419,72 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         emit()
         if needsFullRefresh {
             refresh()
+        }
+    }
+
+    private func sensorIndex(for update: HueSSEUpdate) -> Int? {
+        if let mappedID = sensorServiceToSensorID[update.resourceID],
+           let idx = sensors.firstIndex(where: { $0.id == mappedID }) {
+            return idx
+        }
+        if let idx = sensors.firstIndex(where: { $0.id == update.resourceID || $0.buttonIDs.contains(update.resourceID) }) {
+            return idx
+        }
+        if let owner = update.ownerID, !owner.isEmpty,
+           let idx = sensors.firstIndex(where: { $0.deviceID == owner }) {
+            return idx
+        }
+        return nil
+    }
+
+    private func motionAreaIndex(for update: HueSSEUpdate) -> Int? {
+        if let idx = motionAreas.firstIndex(where: { $0.convenienceID == update.resourceID || $0.id == update.resourceID }) {
+            return idx
+        }
+        if let mappedID = securityMotionToAreaID[update.resourceID],
+           let idx = motionAreas.firstIndex(where: { $0.id == mappedID }) {
+            return idx
+        }
+        if let owner = update.ownerID, !owner.isEmpty,
+           let idx = motionAreas.firstIndex(where: { $0.id == owner }) {
+            return idx
+        }
+        return nil
+    }
+
+    private func syncMotionAwareLightFlags() {
+        var aware = Set<String>()
+        var active = Set<String>()
+        for area in motionAreas {
+            aware.formUnion(area.lightIDs)
+            if area.enabled && area.motion {
+                active.formUnion(area.lightIDs)
+            }
+        }
+        rooms = rooms.map { room in
+            var changed = false
+            let newLights = room.lights.map { light -> HueLight in
+                let isAware = aware.contains(light.id)
+                let isActive = active.contains(light.id)
+                if light.motionAware == isAware && light.motionActive == isActive {
+                    return light
+                }
+                changed = true
+                return HueLight(
+                    id: light.id, deviceID: light.deviceID, name: light.name, on: light.on, bri: light.bri,
+                    dimmable: light.dimmable, color: light.color, reachable: light.reachable,
+                    supportsColor: light.supportsColor, supportsCT: light.supportsCT,
+                    mirek: light.mirek, mirekMin: light.mirekMin, mirekMax: light.mirekMax,
+                    effect: light.effect, availableEffects: light.availableEffects,
+                    motionAware: isAware, motionActive: isActive
+                )
+            }
+            guard changed else { return room }
+            return HueRoom(
+                hueID: room.hueID, kind: room.kind, name: room.name, groupedLight: room.groupedLight,
+                on: room.on, bri: room.bri, onCount: room.onCount, archetype: room.archetype,
+                color: room.color, lights: newLights, scenes: room.scenes
+            )
         }
     }
 
@@ -1253,7 +1511,9 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                     mirekMin: light.mirekMin,
                     mirekMax: light.mirekMax,
                     effect: update.effect ?? light.effect,
-                    availableEffects: light.availableEffects
+                    availableEffects: light.availableEffects,
+                    motionAware: light.motionAware,
+                    motionActive: light.motionActive
                 )
             }
             if changed {
@@ -1284,7 +1544,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                     dimmable: light.dimmable, color: light.color, reachable: light.reachable,
                     supportsColor: light.supportsColor, supportsCT: light.supportsCT,
                     mirek: light.mirek, mirekMin: light.mirekMin, mirekMax: light.mirekMax,
-                    effect: light.effect, availableEffects: light.availableEffects
+                    effect: light.effect, availableEffects: light.availableEffects,
+                    motionAware: light.motionAware, motionActive: light.motionActive
                 )
             }
             let onMembers = newLights.filter(\.on)
@@ -1373,7 +1634,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                     color: newColor ?? light.color, reachable: light.reachable,
                     supportsColor: light.supportsColor, supportsCT: light.supportsCT,
                     mirek: mirek ?? light.mirek, mirekMin: light.mirekMin, mirekMax: light.mirekMax,
-                    effect: effect ?? light.effect, availableEffects: light.availableEffects
+                    effect: effect ?? light.effect, availableEffects: light.availableEffects,
+                    motionAware: light.motionAware, motionActive: light.motionActive
                 )
             }
             let onMembers = newLights.filter(\.on)
@@ -1404,7 +1666,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                     id: light.id, deviceID: light.deviceID, name: light.name, on: on, bri: light.bri, dimmable: light.dimmable,
                     color: light.color, reachable: light.reachable, supportsColor: light.supportsColor,
                     supportsCT: light.supportsCT, mirek: light.mirek, mirekMin: light.mirekMin,
-                    mirekMax: light.mirekMax, effect: light.effect, availableEffects: light.availableEffects
+                    mirekMax: light.mirekMax, effect: light.effect, availableEffects: light.availableEffects,
+                    motionAware: light.motionAware, motionActive: light.motionActive
                 )
             }
             let onMembers = newLights.filter(\.on)
@@ -1479,8 +1742,12 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         errorArgs = []
     }
 
-    private func currentSnapshot() -> HueSnapshot {
-        let info = credentials.map { BridgeInfo(ip: $0.ip, name: $0.name, model: $0.model) }
+    public func currentSnapshot() -> HueSnapshot {
+        let info = credentials.map { creds -> BridgeInfo in
+            let mid = bridgeModelID.isEmpty ? creds.model : bridgeModelID
+            let pro = bridgeIsPro || mid.uppercased() == "BSB003" || !motionAreas.isEmpty
+            return BridgeInfo(ip: creds.ip, name: creds.name, model: creds.model, modelID: mid, isPro: pro)
+        }
         return HueSnapshot(
             phase: phase,
             error: errorText,
@@ -1500,6 +1767,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
             rulesPaused: ruleEngine.paused,
             ruleLog: ruleEngine.log,
             entertainmentAreas: entertainmentAreas,
+            motionAreas: motionAreas,
+            sensors: sensors,
             isDemo: false
         )
     }

@@ -66,6 +66,8 @@ struct SchedulesView: View {
         .sheet(isPresented: $store.showNewScheduleSheet) {
             NewScheduleSheet(prefill: store.schedulePrefillTarget)
                 .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .preferredColorScheme(store.preferredColorScheme)
         }
     }
 }
@@ -78,10 +80,10 @@ private struct ScheduleCard: View {
         HStack(alignment: .center, spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
-                    .fill(schedule.enabled ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
+                    .fill(schedule.enabled ? store.skinAccentColor.opacity(0.16) : Color.primary.opacity(0.06))
                 Image(systemName: triggerSymbol)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(schedule.enabled ? Color.accentColor : Color.secondary)
+                    .foregroundStyle(schedule.enabled ? store.skinAccentColor : Color.secondary)
             }
             .frame(width: 32, height: 32)
 
@@ -94,9 +96,9 @@ private struct ScheduleCard: View {
                         .font(store.scaledFont(9.5, weight: .semibold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1.5)
-                        .foregroundStyle(schedule.source == "local" ? Color.orange : Color.accentColor)
+                        .foregroundStyle(schedule.source == "local" ? Color.orange : store.skinAccentColor)
                         .background(
-                            Capsule().fill((schedule.source == "local" ? Color.orange : Color.accentColor).opacity(0.15))
+                            Capsule().fill((schedule.source == "local" ? Color.orange : store.skinAccentColor).opacity(0.15))
                         )
                 }
                 Text(summaryLine)
@@ -130,11 +132,11 @@ private struct ScheduleCard: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+                .fill(store.cardBackgroundColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(store.cardBorderColor, lineWidth: 1)
         )
         .opacity(schedule.enabled ? 1 : 0.72)
     }
@@ -264,8 +266,8 @@ private struct NewScheduleSheet: View {
                     .font(store.scaledFont(10.5, weight: .semibold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.15)))
-                    .foregroundStyle(Color.accentColor)
+                    .background(Capsule().fill(store.skinAccentColor.opacity(0.15)))
+                    .foregroundStyle(store.skinAccentColor)
             }
             .padding(14)
 

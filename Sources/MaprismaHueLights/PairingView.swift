@@ -22,14 +22,18 @@ struct PairingView: View {
 
     private var card: some View {
         RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-            .fill(Color.primary.opacity(0.05))
+            .fill(store.cardBackgroundColor)
+            .overlay(
+                RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                    .strokeBorder(store.cardBorderColor, lineWidth: 1)
+            )
     }
 
     private func progress(_ s: HueSnapshot) -> some View {
         VStack(spacing: 14) {
             Image(systemName: "hand.tap")
                 .font(.system(size: 34))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(store.skinAccentColor)
             Text(store.trf("Press the round link button on top of the bridge now. Waiting {0} s for {1} …",
                            [String(s.pairRemaining), s.pairIP]))
                 .font(store.scaledFont(12.5))
@@ -69,7 +73,7 @@ struct PairingView: View {
                 ForEach(s.candidates) { candidate in
                     HStack(spacing: 10) {
                         Image(systemName: "wifi.router")
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(store.skinAccentColor)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(candidate.name)
                                 .font(store.scaledFont(12.5, weight: .medium))
@@ -114,7 +118,7 @@ struct PairingView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(store.skinAccentColor)
                 Text(store.tr("Interactive preview"))
                     .font(store.scaledFont(12.5, weight: .semibold))
             }

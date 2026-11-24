@@ -8,8 +8,8 @@ import UniformTypeIdentifiers
 /// resizable Room/Zone boxes with inline Scenes & Scene Scheduling, glowing live Hue lamp nodes,
 /// minimalist rotatable furniture stamps, Bezier dependency wires, and 1-click Bridge Sync.
 struct MapView: View {
-    enum MapTool: String, CaseIterable, Identifiable {
-        case control, edit, wire
+    enum MapMode: String, CaseIterable, Identifiable {
+        case map, rules
         var id: String { rawValue }
     }
 
@@ -18,15 +18,35 @@ struct MapView: View {
         var id: String { rawValue }
     }
 
+    enum LampDialogSheet: Identifiable {
+        case brightness(String)
+        case rename(String)
+        case icon(String)
+
+        var id: String {
+            switch self {
+            case .brightness(let lightID): return "brightness:\(lightID)"
+            case .rename(let lightID): return "rename:\(lightID)"
+            case .icon(let lightID): return "icon:\(lightID)"
+            }
+        }
+    }
+
     struct WireEndpoint: Equatable, Hashable {
-        let kind: String // "light" or "room"
+        let kind: String // "light", "room", "motion", "contact", "button", or "motion_area"
         let id: String
     }
 
-    struct PendingWireCreation: Identifiable {
-        let id = UUID()
-        let source: WireEndpoint
-        let target: WireEndpoint
+    enum RuleDialogState: Identifiable {
+        case create(source: WireEndpoint, target: WireEndpoint)
+        case edit(HueRule)
+
+        var id: String {
+            switch self {
+            case .create(let src, let dst): return "create:\(src.kind):\(src.id)->\(dst.kind):\(dst.id)"
+            case .edit(let rule): return "edit:\(rule.id)"
+            }
+        }
     }
 
     struct PendingSceneSchedule: Identifiable {
@@ -39,7 +59,7 @@ struct MapView: View {
     @Environment(\.openWindow) private var openWindow
     var isCompact: Bool = false
 
-    @State private var tool: MapTool = .control
+    @State private var mode: MapMode = .map
     @State private var sidebarOpen: Bool = true
     @State private var sidebarFilter: SidebarFilter = .all
     @State private var lampSearch: String = ""
@@ -48,22 +68,30 @@ struct MapView: View {
 
     @State private var selectedBoxID: String? = nil
     @State private var selectedLightID: String? = nil
+    @State private var selectedSensorID: String? = nil
     @State private var selectedStampID: String? = nil
-    @State private var inspectedLightID: String? = nil
+    @State private var hoveredLightID: String? = nil
+    @State private var hoveredSensorID: String? = nil
+    @State private var hoveredStampID: String? = nil
     @State private var inspectedBoxID: String? = nil
     @State private var scenesBoxID: String? = nil
-    @State private var inspectedRuleID: String? = nil
-    @State private var showBackgroundPopover: Bool = false
+    @State private var showBackgroundSheet: Bool = false
 
     @State private var canvasViewportSize: CGSize = CGSize(width: 720, height: 500)
     @State private var didInitialFit: Bool = false
 
-    // Transient drag states
+    // Transient drag & dialog states
     @State private var panStart: CGPoint? = nil
     @State private var wireDraftSource: WireEndpoint? = nil
     @State private var wireDraftWorldPoint: CGPoint? = nil
-    @State private var pendingWire: PendingWireCreation? = nil
+    @State private var armedRuleSource: WireEndpoint? = nil
+    @State private var activeLampDialog: LampDialogSheet? = nil
+    @State private var activeRuleDialog: RuleDialogState? = nil
     @State private var pendingSceneSchedule: PendingSceneSchedule? = nil
+
+    private var wiresVisible: Bool {
+        store.floorplan.showWires || mode == .rules
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -85,13 +113,49 @@ struct MapView: View {
         .onAppear {
             sidebarOpen = !isCompact
         }
-        .sheet(item: $pendingWire) { wire in
-            QuickWireRuleSheet(source: wire.source, target: wire.target)
+        .onChange(of: mode) { newMode in
+            if newMode != .rules {
+                armedRuleSource = nil
+                wireDraftSource = nil
+                wireDraftWorldPoint = nil
+            }
+        }
+        .sheet(item: $activeRuleDialog) { state in
+            MapRuleDialogSheet(state: state)
                 .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .preferredColorScheme(store.preferredColorScheme)
+        }
+        .sheet(item: $activeLampDialog) { dialog in
+            switch dialog {
+            case .brightness(let lightID):
+                LampBrightnessSheet(lightID: lightID)
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .preferredColorScheme(store.preferredColorScheme)
+            case .rename(let lightID):
+                LampRenameSheet(lightID: lightID)
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .preferredColorScheme(store.preferredColorScheme)
+            case .icon(let lightID):
+                LampIconPickerSheet(lightID: lightID)
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .preferredColorScheme(store.preferredColorScheme)
+            }
         }
         .sheet(item: $pendingSceneSchedule) { item in
             QuickSceneScheduleSheet(room: item.room, scene: item.scene)
                 .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .preferredColorScheme(store.preferredColorScheme)
+        }
+        .sheet(isPresented: $showBackgroundSheet) {
+            FloorplanBackgroundSheet()
+                .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .preferredColorScheme(store.preferredColorScheme)
         }
     }
 
@@ -100,6 +164,7 @@ struct MapView: View {
     private var toolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
+                // 1. Sidebar toggle
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { sidebarOpen.toggle() }
                 } label: {
@@ -111,166 +176,153 @@ struct MapView: View {
                 .controlSize(.small)
                 .help(store.tr("Toggle lamp sidebar"))
 
-                // 6 Editable Starter Prototypes menu
-                Menu {
-                    ForEach(FloorplanTemplate.allCases) { tpl in
-                        Button {
-                            store.applyFloorplanTemplate(tpl)
-                            fitCanvasToContent()
-                        } label: {
-                            Label(store.tr(tpl.titleKey), systemImage: tpl.symbol)
-                        }
-                    }
-                } label: {
-                    Label(store.tr("Prototypes"), systemImage: "square.grid.2x2")
-                        .font(store.scaledFont(11, weight: .medium))
-                }
-                .menuStyle(.borderedButton)
-                .controlSize(.small)
-                .help(store.tr("Choose Floorplan Prototype"))
-
-                // Tool mode selector
-                Picker("", selection: $tool) {
-                    Text(store.tr("Control")).tag(MapTool.control)
-                    Text(store.tr("Edit")).tag(MapTool.edit)
-                    Text(store.tr("Wire")).tag(MapTool.wire)
+                // 2. Map | Rules sub-tab switcher
+                Picker("", selection: $mode) {
+                    Text(store.tr("Map")).tag(MapMode.map)
+                    Text(store.tr("Rules")).tag(MapMode.rules)
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .controlSize(.small)
-                .frame(width: isCompact ? 156 : 184)
+                .frame(width: isCompact ? 124 : 148)
 
-                // Add Room / Zone / Furniture
-                Button {
-                    let c = visibleWorldCenter()
-                    store.addFloorplanBox(
-                        kind: "room",
-                        name: store.tr("New Room"),
-                        archetype: "other",
-                        at: c.x - 160,
-                        y: c.y - 120
-                    )
-                    tool = .edit
-                } label: {
-                    Label(store.tr("Room"), systemImage: "plus.rectangle")
-                        .font(store.scaledFont(11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(store.tr("Add Room"))
-
-                Button {
-                    let c = visibleWorldCenter()
-                    store.addFloorplanBox(
-                        kind: "zone",
-                        name: store.tr("New Zone"),
-                        archetype: "other",
-                        at: c.x - 170,
-                        y: c.y - 100
-                    )
-                    tool = .edit
-                } label: {
-                    Label(store.tr("Zone"), systemImage: "plus.square.dashed")
-                        .font(store.scaledFont(11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(store.tr("Add Zone"))
-
-                Menu {
-                    ForEach(FloorplanStamp.allKinds, id: \.self) { kind in
+                if mode == .map {
+                    // 3. + Add menu (Room, Zone, 8 Furniture stamps)
+                    Menu {
                         Button {
                             let c = visibleWorldCenter()
-                            store.addStamp(kind: kind, at: c.x - 60, y: c.y - 30)
-                            store.floorplan.showFurniture = true
-                            store.persistFloorplan()
-                            tool = .edit
+                            store.addFloorplanBox(
+                                kind: "room",
+                                name: store.tr("New Room"),
+                                archetype: "other",
+                                at: c.x - 160,
+                                y: c.y - 120
+                            )
                         } label: {
-                            Label(stampLabel(for: kind), systemImage: stampSymbol(for: kind))
+                            Label(store.tr("Add Room"), systemImage: "plus.rectangle")
+                        }
+
+                        Button {
+                            let c = visibleWorldCenter()
+                            store.addFloorplanBox(
+                                kind: "zone",
+                                name: store.tr("New Zone"),
+                                archetype: "other",
+                                at: c.x - 170,
+                                y: c.y - 100
+                            )
+                        } label: {
+                            Label(store.tr("Add Zone"), systemImage: "plus.square.dashed")
+                        }
+
+                        Divider()
+
+                        ForEach(FloorplanStamp.allKinds, id: \.self) { kind in
+                            Button {
+                                let c = visibleWorldCenter()
+                                store.addStamp(kind: kind, at: c.x - 60, y: c.y - 30)
+                                store.floorplan.showFurniture = true
+                                store.persistFloorplan()
+                            } label: {
+                                Label(stampLabel(for: kind), systemImage: stampSymbol(for: kind))
+                            }
+                        }
+                    } label: {
+                        Label(store.tr("Add"), systemImage: "plus")
+                            .font(store.scaledFont(11, weight: .medium))
+                    }
+                    .menuStyle(.borderedButton)
+                    .controlSize(.small)
+
+                    // 4. Prototypes menu (6 starter floorplans)
+                    Menu {
+                        ForEach(FloorplanTemplate.allCases) { tpl in
+                            Button {
+                                store.applyFloorplanTemplate(tpl)
+                                fitCanvasToContent()
+                            } label: {
+                                Label(store.tr(tpl.titleKey), systemImage: tpl.symbol)
+                            }
+                        }
+                    } label: {
+                        Label(store.tr("Prototypes"), systemImage: "square.grid.2x2")
+                            .font(store.scaledFont(11, weight: .medium))
+                    }
+                    .menuStyle(.borderedButton)
+                    .controlSize(.small)
+                    .help(store.tr("Choose Floorplan Prototype"))
+
+                    // 5. View menu (Background… + layers + Auto-sync)
+                    Menu {
+                        Button {
+                            showBackgroundSheet = true
+                        } label: {
+                            Label(
+                                store.tr("Background…"),
+                                systemImage: store.floorplanBackgroundImage == nil ? "photo" : "photo.fill"
+                            )
+                        }
+                        Divider()
+                        Toggle(store.tr("Show grid"), isOn: $showGrid)
+                        Toggle(store.tr("Snap to grid"), isOn: Binding(
+                            get: { store.floorplan.canvas.snap },
+                            set: { store.floorplan.canvas.snap = $0; store.persistFloorplan() }
+                        ))
+                        Toggle(store.tr("Show wires"), isOn: Binding(
+                            get: { store.floorplan.showWires },
+                            set: { store.floorplan.showWires = $0; store.persistFloorplan() }
+                        ))
+                        Toggle(store.tr("Light glows"), isOn: Binding(
+                            get: { store.floorplan.showGlows },
+                            set: { store.floorplan.showGlows = $0; store.persistFloorplan() }
+                        ))
+                        Toggle(store.tr("Show furniture"), isOn: Binding(
+                            get: { store.floorplan.showFurniture },
+                            set: { store.floorplan.showFurniture = $0; store.persistFloorplan() }
+                        ))
+                        Toggle(store.tr("Synth overlay"), isOn: $showSynthOverlay)
+                        Divider()
+                        Toggle(store.tr("Auto-sync to Bridge"), isOn: Binding(
+                            get: { store.floorplan.autoSync },
+                            set: { store.setFloorplanAutoSync($0) }
+                        ))
+                    } label: {
+                        Label(store.tr("View"), systemImage: "eye")
+                            .font(store.scaledFont(11, weight: .medium))
+                    }
+                    .menuStyle(.borderedButton)
+                    .controlSize(.small)
+
+                    // 6. Sync All button with pending count badge
+                    let pending = store.pendingFloorplanSyncPlan
+                    Button {
+                        store.syncAllFloorplanToBridge()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if store.floorplanSyncing {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            Text(store.tr("Sync All"))
+                                .font(store.scaledFont(11, weight: .semibold))
+                            if pending.totalChanges > 0 {
+                                Text("\(pending.totalChanges)")
+                                    .font(store.scaledFont(9.5, weight: .bold).monospacedDigit())
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Capsule().fill(Color.white.opacity(0.28)))
+                            }
                         }
                     }
-                } label: {
-                    Label(store.tr("Furniture"), systemImage: "sofa")
-                        .font(store.scaledFont(11, weight: .medium))
-                }
-                .menuStyle(.borderedButton)
-                .controlSize(.small)
-                .help(store.tr("Add Furniture"))
-
-                // Custom Floorplan Background Image popover
-                Button {
-                    showBackgroundPopover.toggle()
-                } label: {
-                    Label(store.tr("Background"), systemImage: store.floorplanBackgroundImage == nil ? "photo" : "photo.fill")
-                        .font(store.scaledFont(11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .popover(isPresented: $showBackgroundPopover, arrowEdge: .bottom) {
-                    backgroundPopover
+                    .buttonStyle(.borderedProminent)
+                    .tint(pending.hasRoomOrMetaChanges ? store.skinAccentColor : Color.secondary.opacity(0.5))
+                    .controlSize(.small)
+                    .disabled(store.floorplanSyncing)
+                    .help(store.tr("Sync All to Bridge"))
                 }
 
-                // Layers & Auto-sync menu
-                Menu {
-                    Toggle(store.tr("Show grid"), isOn: $showGrid)
-                    Toggle(store.tr("Snap to grid"), isOn: Binding(
-                        get: { store.floorplan.canvas.snap },
-                        set: { store.floorplan.canvas.snap = $0; store.persistFloorplan() }
-                    ))
-                    Toggle(store.tr("Show wires"), isOn: Binding(
-                        get: { store.floorplan.showWires },
-                        set: { store.floorplan.showWires = $0; store.persistFloorplan() }
-                    ))
-                    Toggle(store.tr("Light glows"), isOn: Binding(
-                        get: { store.floorplan.showGlows },
-                        set: { store.floorplan.showGlows = $0; store.persistFloorplan() }
-                    ))
-                    Toggle(store.tr("Show furniture"), isOn: Binding(
-                        get: { store.floorplan.showFurniture },
-                        set: { store.floorplan.showFurniture = $0; store.persistFloorplan() }
-                    ))
-                    Toggle(store.tr("Synth overlay"), isOn: $showSynthOverlay)
-                    Divider()
-                    Toggle(store.tr("Auto-sync to Bridge"), isOn: Binding(
-                        get: { store.floorplan.autoSync },
-                        set: { store.setFloorplanAutoSync($0) }
-                    ))
-                } label: {
-                    Label(store.tr("Layers"), systemImage: "square.3.layers.3d")
-                        .font(store.scaledFont(11, weight: .medium))
-                }
-                .menuStyle(.borderedButton)
-                .controlSize(.small)
-
-                // 1-click Sync All to Bridge
-                let pending = store.pendingFloorplanSyncPlan
-                Button {
-                    store.syncAllFloorplanToBridge()
-                } label: {
-                    HStack(spacing: 4) {
-                        if store.floorplanSyncing {
-                            ProgressView().controlSize(.mini)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                        }
-                        Text(store.tr("Sync All"))
-                            .font(store.scaledFont(11, weight: .semibold))
-                        if pending.totalChanges > 0 {
-                            Text("\(pending.totalChanges)")
-                                .font(store.scaledFont(9.5, weight: .bold).monospacedDigit())
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(Capsule().fill(Color.white.opacity(0.28)))
-                        }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(pending.hasRoomOrMetaChanges ? store.skinAccentColor : Color.secondary.opacity(0.5))
-                .controlSize(.small)
-                .disabled(store.floorplanSyncing)
-                .help(store.tr("Sync All to Bridge"))
-
-                // Zoom controls
+                // 7. Compact Zoom (-, Fit, +) + optional Open-in-window
                 HStack(spacing: 2) {
                     Button { adjustZoom(by: -0.15) } label: {
                         Image(systemName: "minus.magnifyingglass").font(.system(size: 11))
@@ -309,102 +361,6 @@ struct MapView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-        }
-    }
-
-    // MARK: - Custom Floorplan Background Popover
-
-    private var backgroundPopover: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(store.tr("Floorplan Background"))
-                    .font(store.scaledFont(12.5, weight: .semibold))
-                Spacer()
-                if store.floorplan.background.fileName != nil {
-                    Button(role: .destructive) {
-                        store.clearFloorplanBackground()
-                    } label: {
-                        Text(store.tr("Clear"))
-                            .font(store.scaledFont(11))
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-
-            Button {
-                chooseBackgroundImagePanel()
-            } label: {
-                Label(store.tr("Choose Image…"), systemImage: "photo.on.rectangle")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-
-            if let err = store.floorplanBackgroundError {
-                Text(err)
-                    .font(store.scaledFont(10.5))
-                    .foregroundStyle(Color.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if store.floorplanBackgroundImage != nil {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(store.tr("Opacity"))
-                            .font(store.scaledFont(11, weight: .medium))
-                        Spacer()
-                        Text("\(Int((store.floorplan.background.opacity * 100).rounded()))%")
-                            .font(store.scaledFont(11).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Slider(
-                        value: Binding(
-                            get: { store.floorplan.background.opacity },
-                            set: { store.setFloorplanBackgroundOpacity($0) }
-                        ),
-                        in: FloorplanBackground.minOpacity...FloorplanBackground.maxOpacity
-                    )
-                    .controlSize(.small)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(store.tr("Scaling"))
-                        .font(store.scaledFont(11, weight: .medium))
-                    Picker("", selection: Binding(
-                        get: { store.floorplan.background.fit },
-                        set: { store.setFloorplanBackgroundFit($0) }
-                    )) {
-                        Text(store.tr("Contain")).tag(BackgroundFit.contain)
-                        Text(store.tr("Cover")).tag(BackgroundFit.cover)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .controlSize(.small)
-                }
-            } else {
-                Text(store.tr("Place a PNG, JPEG, HEIC, or WebP floorplan behind your rooms and lamps."))
-                    .font(store.scaledFont(10.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(14)
-        .frame(width: 260)
-        .fontDesign(store.fontDesign)
-    }
-
-    private func chooseBackgroundImagePanel() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        var types: [UTType] = [.png, .jpeg, .heic]
-        if let webp = UTType(filenameExtension: "webp") {
-            types.append(webp)
-        }
-        panel.allowedContentTypes = types
-        if panel.runModal() == .OK, let url = panel.url {
-            store.setFloorplanBackground(from: url)
         }
     }
 
@@ -481,6 +437,19 @@ struct MapView: View {
         }
     }
 
+    private var filteredSidebarSensors: [HueSensor] {
+        let query = lampSearch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return store.snapshot.sensors.filter { sensor in
+            if sidebarFilter == .unplaced && store.floorplan.sensors[sensor.id] != nil {
+                return false
+            }
+            if !query.isEmpty {
+                return sensor.name.lowercased().contains(query)
+            }
+            return true
+        }
+    }
+
     private var lampSidebar: some View {
         VStack(spacing: 0) {
             VStack(spacing: 6) {
@@ -519,7 +488,7 @@ struct MapView: View {
             ScrollView {
                 LazyVStack(spacing: 4) {
                     let list = filteredSidebarLights
-                    if list.isEmpty {
+                    if list.isEmpty && filteredSidebarSensors.isEmpty {
                         Text(sidebarFilter == .unplaced ? store.tr("All lamps placed.") : store.tr("No lamps match."))
                             .font(store.scaledFont(11))
                             .foregroundStyle(.secondary)
@@ -529,16 +498,38 @@ struct MapView: View {
                             let placed = store.floorplan.lamps[light.id] != nil
                             sidebarLampRow(light: light, placed: placed)
                         }
+
+                        if !store.snapshot.sensors.isEmpty {
+                            let sensorList = filteredSidebarSensors
+                            if !sensorList.isEmpty {
+                                HStack {
+                                    Text(store.tr("Sensors").uppercased())
+                                        .font(store.scaledFont(9.5, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 5)
+                                .padding(.top, list.isEmpty ? 2 : 8)
+                                .padding(.bottom, 2)
+
+                                ForEach(sensorList) { sensor in
+                                    let placed = store.floorplan.sensors[sensor.id] != nil
+                                    sidebarSensorRow(sensor: sensor, placed: placed)
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(6)
             }
 
-            Divider()
-            wireLegendFooter
-                .padding(8)
+            if mode == .rules {
+                Divider()
+                wireLegendFooter
+                    .padding(8)
+            }
         }
-        .background(Color.primary.opacity(0.02))
+        .background(store.cardBackgroundColor.opacity(0.6))
     }
 
     private func sidebarLampRow(light: HueLight, placed: Bool) -> some View {
@@ -549,9 +540,9 @@ struct MapView: View {
                     .fill(light.on ? Color(hex: light.color) : Color.primary.opacity(0.14))
                     .overlay(Circle().strokeBorder(Color.primary.opacity(0.22), lineWidth: 0.6))
                     .shadow(color: light.on ? Color(hex: light.color).opacity(0.55) : .clear, radius: 4)
-                    .frame(width: 20, height: 20)
+                    .frame(width: 22, height: 22)
                 Image(systemName: chosenIcon.sfSymbol(lit: light.on))
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(light.on ? (prefersDarkGlyph(light.color) ? Color.black : Color.white) : Color.secondary)
             }
 
@@ -566,17 +557,7 @@ struct MapView: View {
 
             Spacer(minLength: 2)
 
-            if placed {
-                Button {
-                    store.unplaceLamp(light.id)
-                } label: {
-                    Image(systemName: "minus.circle")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help(store.tr("Remove from map"))
-            } else {
+            if !placed {
                 Button {
                     placeLampSmartly(light)
                 } label: {
@@ -587,12 +568,67 @@ struct MapView: View {
                 .buttonStyle(.borderless)
                 .help(store.tr("Place on map"))
             }
+
+            Menu {
+                if placed {
+                    Button(light.on ? store.tr("Turn off") : store.tr("Turn on")) {
+                        store.setLight(light, on: !light.on)
+                    }
+                    Button(store.tr("Brightness…")) {
+                        activeLampDialog = .brightness(light.id)
+                    }
+                    Button(store.tr("Rename…")) {
+                        activeLampDialog = .rename(light.id)
+                    }
+                    Button(store.tr("Lamp icon…")) {
+                        activeLampDialog = .icon(light.id)
+                    }
+                    Divider()
+                    Button(store.tr("Wire from here")) {
+                        mode = .rules
+                        selectedLightID = light.id
+                        armedRuleSource = WireEndpoint(kind: "light", id: light.id)
+                        if let placement = store.floorplan.lamps[light.id] {
+                            centerViewport(onWorld: CGPoint(x: placement.x, y: placement.y))
+                        }
+                    }
+                    Button(store.tr("Remove from map"), role: .destructive) {
+                        store.unplaceLamp(light.id)
+                    }
+                } else {
+                    Button(store.tr("Place on map")) {
+                        placeLampSmartly(light)
+                    }
+                    Button(light.on ? store.tr("Turn off") : store.tr("Turn on")) {
+                        store.setLight(light, on: !light.on)
+                    }
+                    Button(store.tr("Brightness…")) {
+                        activeLampDialog = .brightness(light.id)
+                    }
+                    Button(store.tr("Rename…")) {
+                        activeLampDialog = .rename(light.id)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 20)
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
-                .fill(selectedLightID == light.id ? store.skinAccentColor.opacity(0.14) : Color.primary.opacity(0.04))
+                .fill(selectedLightID == light.id ? store.skinAccentColor.opacity(0.16) : Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
+                .strokeBorder(selectedLightID == light.id ? store.skinAccentColor.opacity(0.45) : Color.clear, lineWidth: 0.75)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -612,11 +648,173 @@ struct MapView: View {
             let offset = Double((store.floorplan.lamps.count % 5) - 2) * 28.0
             store.placeLamp(light.id, at: box.centerX + offset, y: box.centerY + 12)
             selectedLightID = light.id
+            selectedSensorID = nil
             centerViewport(onWorld: CGPoint(x: box.centerX, y: box.centerY))
         } else {
             let c = visibleWorldCenter()
             store.placeLamp(light.id, at: c.x, y: c.y)
             selectedLightID = light.id
+            selectedSensorID = nil
+        }
+    }
+
+    private func placeSensorSmartly(_ sensor: HueSensor) {
+        if !sensor.roomID.isEmpty,
+           let box = store.floorplan.boxes.first(where: { $0.hueID == sensor.roomID }) {
+            let offset = Double((store.floorplan.sensors.count % 4)) * 34.0
+            let px = HueColorMath.clamp(box.maxX - 36.0 - offset, box.minX + 26, box.maxX - 24)
+            let py = HueColorMath.clamp(box.maxY - 34.0, box.minY + 46, box.maxY - 24)
+            store.placeSensor(sensor.id, at: px, y: py)
+            selectedSensorID = sensor.id
+            selectedLightID = nil
+            centerViewport(onWorld: CGPoint(x: px, y: py))
+        } else {
+            let c = visibleWorldCenter()
+            store.placeSensor(sensor.id, at: c.x, y: c.y)
+            selectedSensorID = sensor.id
+            selectedLightID = nil
+        }
+    }
+
+    private func sensorSymbol(for sensor: HueSensor) -> String {
+        switch sensor.kind {
+        case "contact":
+            return sensor.open ? "door.left.hand.open" : "door.left.hand.closed"
+        case "button":
+            return "switch.2"
+        default:
+            return "figure.walk"
+        }
+    }
+
+    private func sensorAccentColor(for sensor: HueSensor) -> Color {
+        if !sensor.enabled { return Color.secondary }
+        if sensor.kind == "motion" && sensor.motion { return Color(hex: "#10b981") }
+        if sensor.kind == "contact" && sensor.open { return Color(hex: "#f59e0b") }
+        return Color(hex: "#06b6d4")
+    }
+
+    private func sensorStatusText(for sensor: HueSensor) -> String {
+        var parts: [String] = []
+        if !sensor.enabled {
+            parts.append(store.tr("Disabled"))
+        } else if sensor.kind == "motion" {
+            parts.append(sensor.motion ? store.tr("Motion") : store.tr("Clear"))
+        } else if sensor.kind == "contact" {
+            parts.append(sensor.open ? store.tr("Open") : store.tr("Closed"))
+        } else if sensor.kind == "button" {
+            parts.append(store.tr("Switch"))
+        }
+        if let temp = sensor.temperature {
+            parts.append(String(format: "%.1f°C", temp))
+        }
+        if let bat = sensor.battery {
+            parts.append("\(bat)%")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func sidebarSensorRow(sensor: HueSensor, placed: Bool) -> some View {
+        let tint = sensorAccentColor(for: sensor)
+        let isActive = sensor.enabled && ((sensor.kind == "motion" && sensor.motion) || (sensor.kind == "contact" && sensor.open))
+
+        return HStack(spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isActive ? tint : tint.opacity(sensor.enabled ? 0.16 : 0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(tint.opacity(sensor.enabled ? 0.55 : 0.25), lineWidth: 0.75)
+                    )
+                    .frame(width: 22, height: 22)
+                Image(systemName: sensorSymbol(for: sensor))
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(isActive ? Color.white : tint)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(sensor.name)
+                    .font(store.scaledFont(11, weight: selectedSensorID == sensor.id ? .semibold : .regular))
+                    .lineLimit(1)
+                Text(sensorStatusText(for: sensor))
+                    .font(store.scaledFont(9.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 2)
+
+            if !placed {
+                Button {
+                    placeSensorSmartly(sensor)
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(store.skinAccentColor)
+                }
+                .buttonStyle(.borderless)
+                .help(store.tr("Place on map"))
+            }
+
+            Menu {
+                if !placed {
+                    Button(store.tr("Place on map")) {
+                        placeSensorSmartly(sensor)
+                    }
+                }
+                if sensor.kind == "motion" || sensor.kind == "contact" {
+                    Button(sensor.enabled ? store.tr("Disable") : store.tr("Enable")) {
+                        store.setSensorEnabled(sensor, enabled: !sensor.enabled)
+                    }
+                }
+                Button(store.tr("Wire from here")) {
+                    if !placed {
+                        placeSensorSmartly(sensor)
+                    }
+                    mode = .rules
+                    selectedSensorID = sensor.id
+                    selectedLightID = nil
+                    armedRuleSource = WireEndpoint(kind: sensor.kind, id: sensor.id)
+                    if let placement = store.floorplan.sensors[sensor.id] {
+                        centerViewport(onWorld: CGPoint(x: placement.x, y: placement.y))
+                    }
+                }
+                if placed {
+                    Divider()
+                    Button(store.tr("Remove from map"), role: .destructive) {
+                        store.unplaceSensor(sensor.id)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 20)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
+                .fill(selectedSensorID == sensor.id ? store.skinAccentColor.opacity(0.16) : Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
+                .strokeBorder(selectedSensorID == sensor.id ? store.skinAccentColor.opacity(0.45) : Color.clear, lineWidth: 0.75)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let placement = store.floorplan.sensors[sensor.id] {
+                selectedSensorID = sensor.id
+                selectedLightID = nil
+                centerViewport(onWorld: CGPoint(x: placement.x, y: placement.y))
+            } else {
+                placeSensorSmartly(sensor)
+            }
         }
     }
 
@@ -668,16 +866,25 @@ struct MapView: View {
             let animatePulse = Date().timeIntervalSince(store.lastFiredRuleAt) < 2.0 || store.synthRunning
             TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !animatePulse)) { timeline in
                 ZStack(alignment: .topLeading) {
-                    // 0. Backdrop & Optional Custom Floorplan Background Image
+                    // 0. Backdrop, Click-Line Hit Testing & Pan
                     Rectangle()
                         .fill(Color.primary.opacity(0.03))
                         .contentShape(Rectangle())
-                        .gesture(canvasPanGesture)
-                        .onTapGesture {
-                            selectedBoxID = nil
-                            selectedLightID = nil
-                            selectedStampID = nil
-                        }
+                        .gesture(
+                            SpatialTapGesture()
+                                .onEnded { value in
+                                    if wiresVisible, let hitRule = hitTestRule(at: value.location) {
+                                        activeRuleDialog = .edit(hitRule)
+                                        return
+                                    }
+                                    selectedBoxID = nil
+                                    selectedLightID = nil
+                                    selectedSensorID = nil
+                                    selectedStampID = nil
+                                    armedRuleSource = nil
+                                }
+                        )
+                        .simultaneousGesture(canvasPanGesture)
 
                     if let bgImage = store.floorplanBackgroundImage {
                         let bg = store.floorplan.background
@@ -702,7 +909,7 @@ struct MapView: View {
                         if store.floorplan.showGlows {
                             drawLightHalos(in: &ctx)
                         }
-                        if store.floorplan.showWires {
+                        if wiresVisible {
                             drawDependencyWires(in: &ctx, now: timeline.date)
                         }
                         if showSynthOverlay || store.synthRunning {
@@ -715,8 +922,8 @@ struct MapView: View {
                     }
                     .allowsHitTesting(false)
 
-                    // 2. Interactive Furniture Stamp Handles (Edit mode)
-                    if tool == .edit && store.floorplan.showFurniture {
+                    // 2. Direct-Manipulation Furniture Stamp Handles (Map mode)
+                    if mode == .map && store.floorplan.showFurniture {
                         ForEach(store.floorplan.stamps) { stamp in
                             stampEditOverlay(stamp)
                         }
@@ -734,21 +941,29 @@ struct MapView: View {
                         }
                     }
 
+                    // 4b. Interactive Physical Hue Sensor Nodes (rounded squares)
+                    ForEach(placedSensors) { sensor in
+                        if let placement = store.floorplan.sensors[sensor.id] {
+                            sensorNodeLayer(sensor: sensor, placement: placement)
+                        }
+                    }
+
                     // 5. Clickable Wire Midpoint Pills
-                    if store.floorplan.showWires {
+                    if wiresVisible {
                         ForEach(visibleWireBadges) { badge in
                             wireMidpointPill(badge)
                         }
                     }
 
-                    // Mode hint pill at bottom-right
-                    VStack {
-                        Spacer()
-                        HStack {
+                    // 6. Clean 1-line Rules Mode Hint Pill at top of canvas
+                    if mode == .rules {
+                        VStack {
+                            rulesHintPill
+                                .padding(.top, 10)
+                                .padding(.horizontal, 12)
                             Spacer()
-                            modeHintPill
-                                .padding(10)
                         }
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -771,22 +986,45 @@ struct MapView: View {
         store.snapshot.allLights.filter { store.floorplan.lamps[$0.id] != nil }
     }
 
-    private var modeHintPill: some View {
-        let text: String = {
-            switch tool {
-            case .control: return store.tr("Control: click lamps to toggle · drag empty space to pan")
-            case .edit: return store.tr("Edit: drag lamps, rooms & resize handles · click to rename")
-            case .wire: return store.tr("Wire: drag from ● connector to another lamp or room")
+    private var placedSensors: [HueSensor] {
+        store.snapshot.sensors.filter { store.floorplan.sensors[$0.id] != nil }
+    }
+
+    @ViewBuilder
+    private var rulesHintPill: some View {
+        if let armed = armedRuleSource {
+            let srcName = store.nameForTarget(kind: armed.kind, id: armed.id)
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(store.skinAccentColor)
+                    .frame(width: 7, height: 7)
+                Text(store.trf("Click another lamp or room to link with {0}", [srcName]))
+                    .font(store.scaledFont(10.5, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Button(store.tr("Cancel")) {
+                    armedRuleSource = nil
+                }
+                .buttonStyle(.borderless)
+                .font(store.scaledFont(10.5, weight: .semibold))
+                .foregroundStyle(store.skinAccentColor)
             }
-        }()
-        return Text(text)
-            .font(store.scaledFont(10))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(.ultraThinMaterial))
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
-            .allowsHitTesting(false)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(.regularMaterial))
+            .overlay(Capsule().strokeBorder(store.skinAccentColor.opacity(0.45), lineWidth: 1))
+            .shadow(color: Color.black.opacity(0.12), radius: 4, y: 1)
+        } else {
+            Text(store.tr("Drag from a lamp or sensor to a lamp to create a rule, or click any line to edit or delete."))
+                .font(store.scaledFont(10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(.ultraThinMaterial))
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+                .allowsHitTesting(false)
+        }
     }
 
     private var canvasPanGesture: some Gesture {
@@ -995,6 +1233,15 @@ struct MapView: View {
     private func worldAnchor(for endpoint: WireEndpoint) -> CGPoint? {
         if endpoint.kind == "light", let p = store.floorplan.lamps[endpoint.id] {
             return CGPoint(x: p.x, y: p.y)
+        }
+        if (endpoint.kind == "motion" || endpoint.kind == "contact" || endpoint.kind == "button"),
+           let p = store.floorplan.sensors[endpoint.id] {
+            return CGPoint(x: p.x, y: p.y)
+        }
+        if endpoint.kind == "motion_area",
+           let area = store.snapshot.motionArea(endpoint.id),
+           let box = store.floorplan.boxes.first(where: { $0.hueID == area.roomID }) {
+            return CGPoint(x: box.centerX, y: box.minY + 18)
         }
         if endpoint.kind == "room",
            let box = store.floorplan.boxes.first(where: { $0.hueID == endpoint.id || $0.id == endpoint.id }) {
@@ -1214,7 +1461,7 @@ struct MapView: View {
 
     private func wireMidpointPill(_ item: WireBadgeItem) -> some View {
         Button {
-            inspectedRuleID = item.rule.id
+            activeRuleDialog = .edit(item.rule)
         } label: {
             Text(item.glyph)
                 .font(.system(size: 9.5, weight: .bold))
@@ -1226,33 +1473,73 @@ struct MapView: View {
         }
         .buttonStyle(.plain)
         .position(item.screenPosition)
-        .popover(isPresented: Binding(
-            get: { inspectedRuleID == item.rule.id },
-            set: { if !$0 && inspectedRuleID == item.rule.id { inspectedRuleID = nil } }
-        )) {
-            WireRuleInspectorPopover(rule: item.rule) {
-                inspectedRuleID = nil
-            }
-            .environmentObject(store)
-        }
+        .help(item.rule.name.isEmpty ? store.tr("Edit Rule") : item.rule.name)
     }
 
-    // MARK: - Interactive Furniture Stamp Overlay (Edit Mode)
+    /// Finds the closest visible dependency rule whose Bezier curve passes within `maxDistance` points
+    /// of `screenPoint`, using sampled cubic curve segments so clicking anywhere along a line works.
+    private func hitTestRule(at screenPoint: CGPoint, maxDistance: CGFloat = 12.0) -> HueRule? {
+        var best: (rule: HueRule, dist: CGFloat)? = nil
+        let segments = 24
+        for rule in store.rules {
+            guard let srcWorld = worldAnchor(for: WireEndpoint(kind: rule.triggerKind, id: rule.triggerID)) else { continue }
+            let p0 = worldToScreen(srcWorld)
+            for target in rule.targets {
+                guard let dstWorld = worldAnchor(for: WireEndpoint(kind: target.kind, id: target.id)) else { continue }
+                let p1 = worldToScreen(dstWorld)
+                let (c1, c2) = cubicControlPoints(from: p0, to: p1)
+                var prev = p0
+                for i in 1...segments {
+                    let t = CGFloat(i) / CGFloat(segments)
+                    let curr = evalCubic(p0, c1, c2, p1, t: t)
+                    let d = distanceFromPoint(screenPoint, toSegment: prev, curr)
+                    if d <= maxDistance, (best == nil || d < best!.dist) {
+                        best = (rule, d)
+                    }
+                    prev = curr
+                }
+            }
+        }
+        return best?.rule
+    }
+
+    private func distanceFromPoint(_ p: CGPoint, toSegment a: CGPoint, _ b: CGPoint) -> CGFloat {
+        let abx = b.x - a.x
+        let aby = b.y - a.y
+        let lenSq = abx * abx + aby * aby
+        if lenSq <= 0.0001 {
+            return hypot(p.x - a.x, p.y - a.y)
+        }
+        let t = max(0, min(1, ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq))
+        let projX = a.x + t * abx
+        let projY = a.y + t * aby
+        return hypot(p.x - projX, p.y - projY)
+    }
+
+    // MARK: - Interactive Furniture Stamp Overlay (Map Mode)
 
     private func stampEditOverlay(_ stamp: FloorplanStamp) -> some View {
         let center = worldToScreen(CGPoint(x: stamp.x + stamp.width / 2, y: stamp.y + stamp.height / 2))
         let w = max(32, CGFloat(stamp.width) * zoom)
         let h = max(24, CGFloat(stamp.height) * zoom)
         let isSelected = selectedStampID == stamp.id
+        let isHovered = hoveredStampID == stamp.id
 
         return ZStack(alignment: .topTrailing) {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .strokeBorder(
-                    isSelected ? store.skinAccentColor : Color.primary.opacity(0.18),
+                    isSelected ? store.skinAccentColor : (isHovered ? Color.primary.opacity(0.22) : Color.clear),
                     style: StrokeStyle(lineWidth: isSelected ? 1.5 : 1, dash: [4, 3])
                 )
                 .background(Color.clear)
                 .contentShape(Rectangle())
+                .onHover { hovering in
+                    if hovering {
+                        hoveredStampID = stamp.id
+                    } else if hoveredStampID == stamp.id {
+                        hoveredStampID = nil
+                    }
+                }
                 .onTapGesture {
                     selectedStampID = stamp.id
                     selectedBoxID = nil
@@ -1307,6 +1594,7 @@ struct MapView: View {
     private func roomBoxLayer(_ box: FloorplanBox) -> some View {
         let linkedRoom = box.hueID.flatMap { hid in store.snapshot.rooms.first(where: { $0.hueID == hid }) }
         let roomSchedules = box.hueID.map { store.schedulesForRoom($0) } ?? []
+        let roomMotionArea = box.hueID.flatMap { store.motionArea(forRoom: $0) }
         let screenOrigin = worldToScreen(CGPoint(x: box.x, y: box.y))
         let w = CGFloat(box.width) * zoom
         let h = CGFloat(box.height) * zoom
@@ -1319,16 +1607,26 @@ struct MapView: View {
             box: box,
             linkedRoom: linkedRoom,
             schedules: roomSchedules,
+            motionArea: roomMotionArea,
             width: w,
             height: h,
             zoom: zoom,
-            tool: tool,
+            mode: mode,
             isSelected: isSelected,
             tintColor: tintColor,
             lit: lit,
             onSelect: {
+                if mode == .rules, let hueID = box.hueID {
+                    let endpoint = WireEndpoint(kind: "room", id: hueID)
+                    if let armed = armedRuleSource, armed != endpoint {
+                        activeRuleDialog = .create(source: armed, target: endpoint)
+                        armedRuleSource = nil
+                        return
+                    }
+                }
                 selectedBoxID = box.id
                 selectedLightID = nil
+                selectedSensorID = nil
                 selectedStampID = nil
             },
             onOpenScenes: {
@@ -1381,37 +1679,56 @@ struct MapView: View {
     private func lampNodeLayer(light: HueLight, placement: FloorplanLampPlacement) -> some View {
         let pos = worldToScreen(CGPoint(x: placement.x, y: placement.y))
         let isSelected = selectedLightID == light.id
+        let isArmed = mode == .rules && armedRuleSource == WireEndpoint(kind: "light", id: light.id)
 
         return FloorplanLampNodeView(
             light: light,
             placement: placement,
             zoom: zoom,
-            tool: tool,
+            mode: mode,
             isSelected: isSelected,
-            synthBand: (showSynthOverlay || store.synthRunning) ? store.synthLightBand(for: light.id) : nil,
-            inspectorPresented: Binding(
-                get: { inspectedLightID == light.id },
-                set: { if !$0 && inspectedLightID == light.id { inspectedLightID = nil } }
-            ),
+            isArmedSource: isArmed,
             onTap: {
                 selectedLightID = light.id
+                selectedSensorID = nil
                 selectedBoxID = nil
                 selectedStampID = nil
-                if tool == .control {
-                    store.setLight(light, on: !light.on)
-                } else {
-                    inspectedLightID = light.id
+                if mode == .rules {
+                    let tapped = WireEndpoint(kind: "light", id: light.id)
+                    if let armed = armedRuleSource {
+                        if armed == tapped {
+                            armedRuleSource = nil
+                        } else {
+                            activeRuleDialog = .create(source: armed, target: tapped)
+                            armedRuleSource = nil
+                        }
+                    } else {
+                        armedRuleSource = tapped
+                    }
                 }
             },
-            onInspect: {
-                selectedLightID = light.id
-                inspectedLightID = light.id
+            onHoverChanged: { hovering in
+                if hovering {
+                    hoveredLightID = light.id
+                } else if hoveredLightID == light.id {
+                    hoveredLightID = nil
+                }
+            },
+            onOpenBrightness: {
+                activeLampDialog = .brightness(light.id)
+            },
+            onOpenRename: {
+                activeLampDialog = .rename(light.id)
+            },
+            onOpenIcon: {
+                activeLampDialog = .icon(light.id)
             },
             onMove: { screenPoint, finalize in
                 let w = screenToWorld(screenPoint)
                 store.moveLamp(light.id, to: Double(w.x), y: Double(w.y), finalize: finalize)
             },
             onWireDragChanged: { screenPoint in
+                armedRuleSource = nil
                 wireDraftSource = WireEndpoint(kind: "light", id: light.id)
                 wireDraftWorldPoint = screenToWorld(screenPoint)
             },
@@ -1420,6 +1737,65 @@ struct MapView: View {
             }
         )
         .position(pos)
+        .zIndex(hoveredLightID == light.id ? 100 : (isSelected || isArmed ? 10 : 1))
+    }
+
+    private func sensorNodeLayer(sensor: HueSensor, placement: FloorplanSensorPlacement) -> some View {
+        let pos = worldToScreen(CGPoint(x: placement.x, y: placement.y))
+        let isSelected = selectedSensorID == sensor.id
+        let isArmed = mode == .rules && armedRuleSource == WireEndpoint(kind: sensor.kind, id: sensor.id)
+
+        return FloorplanSensorNodeView(
+            sensor: sensor,
+            symbol: sensorSymbol(for: sensor),
+            accentColor: sensorAccentColor(for: sensor),
+            statusText: sensorStatusText(for: sensor),
+            zoom: zoom,
+            mode: mode,
+            isSelected: isSelected,
+            isArmedSource: isArmed,
+            onTap: {
+                selectedSensorID = sensor.id
+                selectedLightID = nil
+                selectedBoxID = nil
+                selectedStampID = nil
+                if mode == .rules {
+                    let tapped = WireEndpoint(kind: sensor.kind, id: sensor.id)
+                    if armedRuleSource == tapped {
+                        armedRuleSource = nil
+                    } else {
+                        armedRuleSource = tapped
+                    }
+                }
+            },
+            onHoverChanged: { hovering in
+                if hovering {
+                    hoveredSensorID = sensor.id
+                } else if hoveredSensorID == sensor.id {
+                    hoveredSensorID = nil
+                }
+            },
+            onWireFromHere: {
+                mode = .rules
+                selectedSensorID = sensor.id
+                selectedLightID = nil
+                armedRuleSource = WireEndpoint(kind: sensor.kind, id: sensor.id)
+            },
+            onMove: { screenPoint, finalize in
+                let w = screenToWorld(screenPoint)
+                store.moveSensor(sensor.id, to: Double(w.x), y: Double(w.y), finalize: finalize)
+            },
+            onWireDragChanged: { screenPoint in
+                armedRuleSource = nil
+                wireDraftSource = WireEndpoint(kind: sensor.kind, id: sensor.id)
+                wireDraftWorldPoint = screenToWorld(screenPoint)
+            },
+            onWireDragEnded: { screenPoint in
+                finishWireDrag(from: WireEndpoint(kind: sensor.kind, id: sensor.id), atScreen: screenPoint)
+            }
+        )
+        .position(pos)
+        .zIndex(hoveredSensorID == sensor.id ? 100 : (isSelected || isArmed ? 12 : 2))
     }
 
     private func finishWireDrag(from source: WireEndpoint, atScreen screenPoint: CGPoint) {
@@ -1435,12 +1811,12 @@ struct MapView: View {
             if source.kind == "light" && source.id == light.id { continue }
             guard let p = store.floorplan.lamps[light.id] else { continue }
             let d = hypot(p.x - Double(worldPt.x), p.y - Double(worldPt.y))
-            if d <= 42.0, (bestLight == nil || d < bestLight!.dist) {
+            if d <= 44.0, (bestLight == nil || d < bestLight!.dist) {
                 bestLight = (light.id, d)
             }
         }
         if let hit = bestLight {
-            pendingWire = PendingWireCreation(source: source, target: WireEndpoint(kind: "light", id: hit.id))
+            activeRuleDialog = .create(source: source, target: WireEndpoint(kind: "light", id: hit.id))
             return
         }
 
@@ -1449,7 +1825,7 @@ struct MapView: View {
            let hueID = box.hueID {
             let target = WireEndpoint(kind: "room", id: hueID)
             if target != source {
-                pendingWire = PendingWireCreation(source: source, target: target)
+                activeRuleDialog = .create(source: source, target: target)
             }
         }
     }
@@ -1495,6 +1871,12 @@ struct MapView: View {
             maxY = max(maxY, b.maxY)
         }
         for p in store.floorplan.lamps.values {
+            minX = min(minX, p.x - 40)
+            minY = min(minY, p.y - 40)
+            maxX = max(maxX, p.x + 40)
+            maxY = max(maxY, p.y + 40)
+        }
+        for p in store.floorplan.sensors.values {
             minX = min(minX, p.x - 40)
             minY = min(minY, p.y - 40)
             maxX = max(maxX, p.x + 40)
@@ -1561,10 +1943,11 @@ private struct FloorplanRoomBoxView: View {
     let box: FloorplanBox
     let linkedRoom: HueRoom?
     let schedules: [HueSchedule]
+    let motionArea: HueMotionArea?
     let width: CGFloat
     let height: CGFloat
     let zoom: CGFloat
-    let tool: MapView.MapTool
+    let mode: MapView.MapMode
     let isSelected: Bool
     let tintColor: Color
     let lit: Bool
@@ -1582,6 +1965,7 @@ private struct FloorplanRoomBoxView: View {
     @State private var dragStartBox: FloorplanBox? = nil
     @State private var dragEnclosedIDs: [String] = []
     @State private var dragStartLamps: [String: (Double, Double)] = [:]
+    @State private var dragStartSensors: [String: (Double, Double)] = [:]
 
     var body: some View {
         let isZone = box.kind == "zone"
@@ -1591,7 +1975,7 @@ private struct FloorplanRoomBoxView: View {
         )
 
         ZStack(alignment: .topLeading) {
-            // Room surface fill + architectural wall outline
+            // Room surface fill + architectural wall outline (pass-through so wires & canvas panning work cleanly)
             RoundedRectangle(cornerRadius: isZone ? 10 : 6, style: .continuous)
                 .fill(lit ? tintColor.opacity(0.11) : Color.primary.opacity(0.035))
                 .overlay(
@@ -1601,6 +1985,7 @@ private struct FloorplanRoomBoxView: View {
                             style: borderStyle
                         )
                 )
+                .allowsHitTesting(false)
 
             // Header bar (name, schedule badge, scenes, inspector, power)
             HStack(spacing: 4) {
@@ -1616,6 +2001,26 @@ private struct FloorplanRoomBoxView: View {
                     Text("\(room.onCount)/\(room.lights.count)")
                         .font(store.scaledFont(9.5).monospacedDigit())
                         .foregroundStyle(.secondary)
+                }
+
+                if let area = motionArea, area.enabled {
+                    let active = area.motion
+                    HStack(spacing: 2.5) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 8.5, weight: .semibold))
+                        if active {
+                            Circle()
+                                .fill(Color(hex: "#10b981"))
+                                .frame(width: 5, height: 5)
+                        }
+                    }
+                    .foregroundStyle(active ? Color(hex: "#10b981") : Color(hex: "#06b6d4"))
+                    .padding(.horizontal, 4.5)
+                    .padding(.vertical, 1.5)
+                    .background(
+                        Capsule().fill((active ? Color(hex: "#10b981") : Color(hex: "#06b6d4")).opacity(active ? 0.18 : 0.10))
+                    )
+                    .help(active ? store.tr("MotionAware presence detected") : store.tr("MotionAware active"))
                 }
 
                 if let firstSched = schedules.first {
@@ -1682,15 +2087,15 @@ private struct FloorplanRoomBoxView: View {
             .clipShape(RoundedRectangle(cornerRadius: isZone ? 9 : 5, style: .continuous))
             .contentShape(Rectangle())
             .onTapGesture { onSelect() }
-            .gesture(moveBoxGesture, including: tool == .edit ? .all : .none)
+            .gesture(moveBoxGesture, including: mode == .map ? .all : .none)
 
-            // 8 Resize Handles in Edit mode
-            if tool == .edit {
+            // 8 Resize Handles when selected in Map mode
+            if mode == .map && isSelected {
                 resizeHandlesOverlay
             }
 
-            // Right-edge connector port in Wire mode (for linked Bridge rooms)
-            if tool == .wire && box.hueID != nil {
+            // Right-edge connector port in Rules mode (for linked Bridge rooms)
+            if mode == .rules && box.hueID != nil {
                 Circle()
                     .fill(store.skinAccentColor)
                     .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
@@ -1743,6 +2148,11 @@ private struct FloorplanRoomBoxView: View {
                         if let p = store.floorplan.lamps[lid] { starts[lid] = (p.x, p.y) }
                     }
                     dragStartLamps = starts
+                    var sensorStarts: [String: (Double, Double)] = [:]
+                    for (sid, p) in store.floorplan.sensors where box.contains(x: p.x, y: p.y) {
+                        sensorStarts[sid] = (p.x, p.y)
+                    }
+                    dragStartSensors = sensorStarts
                 }
                 guard let orig = dragStartBox else { return }
                 let dx = Double(value.translation.width / max(0.2, zoom))
@@ -1758,6 +2168,13 @@ private struct FloorplanRoomBoxView: View {
                         lamp.x = startPos.0 + dx
                         lamp.y = startPos.1 + dy
                         store.floorplan.lamps[lid] = lamp
+                    }
+                }
+                for (sid, startPos) in dragStartSensors {
+                    if var sensor = store.floorplan.sensors[sid] {
+                        sensor.x = startPos.0 + dx
+                        sensor.y = startPos.1 + dy
+                        store.floorplan.sensors[sid] = sensor
                     }
                 }
             }
@@ -1780,9 +2197,17 @@ private struct FloorplanRoomBoxView: View {
                         store.floorplan.lamps[lid] = lamp
                     }
                 }
+                for (sid, startPos) in dragStartSensors {
+                    if var sensor = store.floorplan.sensors[sid] {
+                        sensor.x = startPos.0 + snappedDX
+                        sensor.y = startPos.1 + snappedDY
+                        store.floorplan.sensors[sid] = sensor
+                    }
+                }
                 dragStartBox = nil
                 dragEnclosedIDs = []
                 dragStartLamps = [:]
+                dragStartSensors = [:]
                 store.persistFloorplan()
             }
     }
@@ -1888,112 +2313,240 @@ private struct FloorplanLampNodeView: View {
     let light: HueLight
     let placement: FloorplanLampPlacement
     let zoom: CGFloat
-    let tool: MapView.MapTool
+    let mode: MapView.MapMode
     let isSelected: Bool
-    let synthBand: SynthBand?
-    @Binding var inspectorPresented: Bool
+    let isArmedSource: Bool
 
     let onTap: () -> Void
-    let onInspect: () -> Void
+    let onHoverChanged: (Bool) -> Void
+    let onOpenBrightness: () -> Void
+    let onOpenRename: () -> Void
+    let onOpenIcon: () -> Void
     let onMove: (CGPoint, Bool) -> Void
     let onWireDragChanged: (CGPoint) -> Void
     let onWireDragEnded: (CGPoint) -> Void
 
+    @State private var isHovered: Bool = false
+
     var body: some View {
-        let nodeSize = max(24, min(36, 30 * zoom))
+        let nodeSize = max(28, min(40, 34 * zoom))
         let fillColor = light.on ? Color(hex: light.color) : Color(NSColor.controlBackgroundColor)
         let glyphColor: Color = light.on ? (prefersDarkGlyph(light.color) ? .black : .white) : .secondary
 
-        VStack(spacing: 3) {
-            ZStack {
+        ZStack {
+            if isArmedSource {
                 Circle()
-                    .fill(fillColor)
-                    .overlay(
-                        Circle().strokeBorder(
-                            isSelected ? store.skinAccentColor : (light.on ? Color.white.opacity(0.85) : Color.primary.opacity(0.28)),
-                            lineWidth: isSelected ? 2.4 : 1.4
-                        )
+                    .strokeBorder(store.skinAccentColor, style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                    .frame(width: nodeSize + 10, height: nodeSize + 10)
+            }
+
+            Circle()
+                .fill(fillColor)
+                .overlay(
+                    Circle().strokeBorder(
+                        (isSelected || isArmedSource) ? store.skinAccentColor : (light.on ? Color.white.opacity(0.88) : Color.primary.opacity(0.28)),
+                        lineWidth: (isSelected || isArmedSource) ? 2.5 : 1.5
                     )
-                    .shadow(color: light.on ? Color(hex: light.color).opacity(0.55) : Color.black.opacity(0.18), radius: light.on ? 7 : 2)
-                    .frame(width: nodeSize, height: nodeSize)
+                )
+                .shadow(color: light.on ? Color(hex: light.color).opacity(0.55) : Color.black.opacity(0.18), radius: light.on ? 7 : 2)
+                .frame(width: nodeSize, height: nodeSize)
 
-                Image(systemName: placement.icon.sfSymbol(lit: light.on))
-                    .font(.system(size: nodeSize * 0.44, weight: .semibold))
-                    .foregroundStyle(glyphColor)
+            Image(systemName: placement.icon.sfSymbol(lit: light.on))
+                .font(.system(size: nodeSize * 0.48, weight: .semibold))
+                .foregroundStyle(glyphColor)
 
-                // Wire mode right-edge connector port
-                if tool == .wire {
+            if light.motionAware {
+                let badgeSize = max(13, min(16, nodeSize * 0.42))
+                let badgeColor = light.motionActive ? Color(hex: "#10b981") : Color(hex: "#06b6d4")
+                ZStack {
                     Circle()
-                        .fill(store.skinAccentColor)
-                        .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
-                        .frame(width: 11, height: 11)
-                        .offset(x: nodeSize / 2 + 2)
-                        .gesture(
-                            DragGesture(minimumDistance: 0, coordinateSpace: .named("floorplanCanvas"))
-                                .onChanged { onWireDragChanged($0.location) }
-                                .onEnded { onWireDragEnded($0.location) }
-                        )
+                        .fill(badgeColor)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.92), lineWidth: 1.1))
+                        .shadow(color: light.motionActive ? badgeColor.opacity(0.75) : Color.black.opacity(0.22), radius: light.motionActive ? 5 : 2)
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: badgeSize * 0.56, weight: .bold))
+                        .foregroundStyle(Color.white)
                 }
+                .frame(width: badgeSize, height: badgeSize)
+                .offset(x: nodeSize * 0.36, y: -nodeSize * 0.36)
+                .allowsHitTesting(false)
             }
-            .contentShape(Circle())
-            .onTapGesture { onTap() }
-            .contextMenu {
-                Button(light.on ? store.tr("Turn off") : store.tr("Turn on")) {
-                    store.setLight(light, on: !light.on)
-                }
-                Button(store.tr("Inspect & Rename…")) { onInspect() }
-                Divider()
-                Button(store.tr("Remove from map")) {
-                    store.unplaceLamp(light.id)
-                }
+        }
+        .frame(width: nodeSize, height: nodeSize)
+        .contentShape(Circle())
+        .onHover { hovering in
+            isHovered = hovering
+            onHoverChanged(hovering)
+        }
+        .overlay(alignment: .top) {
+            if isHovered {
+                Text(light.name)
+                    .font(store.scaledFont(10.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3.5)
+                    .background(Capsule().fill(.regularMaterial))
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.75))
+                    .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
+                    .offset(y: -28)
+                    .allowsHitTesting(false)
+                    .zIndex(100)
             }
-            .gesture(
-                DragGesture(minimumDistance: 2, coordinateSpace: .named("floorplanCanvas"))
-                    .onChanged { value in
-                        if tool == .edit {
-                            onMove(value.location, false)
-                        } else if tool == .wire {
-                            onWireDragChanged(value.location)
-                        }
+        }
+        .help(light.name)
+        .onTapGesture { onTap() }
+        .contextMenu {
+            Button(light.on ? store.tr("Turn off") : store.tr("Turn on")) {
+                store.setLight(light, on: !light.on)
+            }
+            Button(store.tr("Brightness…")) { onOpenBrightness() }
+            Button(store.tr("Rename…")) { onOpenRename() }
+            Button(store.tr("Lamp icon…")) { onOpenIcon() }
+            Divider()
+            Button(store.tr("Remove from map"), role: .destructive) {
+                store.unplaceLamp(light.id)
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 2, coordinateSpace: .named("floorplanCanvas"))
+                .onChanged { value in
+                    if mode == .map {
+                        onMove(value.location, false)
+                    } else {
+                        onWireDragChanged(value.location)
                     }
-                    .onEnded { value in
-                        if tool == .edit {
-                            onMove(value.location, true)
-                        } else if tool == .wire {
-                            onWireDragEnded(value.location)
-                        }
-                    },
-                including: (tool == .edit || tool == .wire) ? .all : .none
-            )
-            .popover(isPresented: $inspectorPresented, arrowEdge: .bottom) {
-                LampMapInspectorPopover(light: light, placement: placement) {
-                    inspectorPresented = false
                 }
-                .environmentObject(store)
+                .onEnded { value in
+                    if mode == .map {
+                        onMove(value.location, true)
+                    } else {
+                        onWireDragEnded(value.location)
+                    }
+                }
+        )
+    }
+}
+
+// MARK: - Interactive Physical Hue Sensor Node Component (Rounded Square)
+
+private struct FloorplanSensorNodeView: View {
+    @EnvironmentObject var store: HueStore
+
+    let sensor: HueSensor
+    let symbol: String
+    let accentColor: Color
+    let statusText: String
+    let zoom: CGFloat
+    let mode: MapView.MapMode
+    let isSelected: Bool
+    let isArmedSource: Bool
+
+    let onTap: () -> Void
+    let onHoverChanged: (Bool) -> Void
+    let onWireFromHere: () -> Void
+    let onMove: (CGPoint, Bool) -> Void
+    let onWireDragChanged: (CGPoint) -> Void
+    let onWireDragEnded: (CGPoint) -> Void
+
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        let nodeSize = max(26, min(36, 30 * zoom))
+        let isActive = sensor.enabled && ((sensor.kind == "motion" && sensor.motion) || (sensor.kind == "contact" && sensor.open))
+        let bgFill: Color = isActive ? accentColor : Color(NSColor.controlBackgroundColor)
+        let fgColor: Color = isActive ? Color.white : accentColor
+        let cornerRadius: CGFloat = 8
+
+        ZStack {
+            if isArmedSource {
+                RoundedRectangle(cornerRadius: cornerRadius + 3, style: .continuous)
+                    .strokeBorder(store.skinAccentColor, style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                    .frame(width: nodeSize + 10, height: nodeSize + 10)
             }
 
-            // Compact readable label pill below lamp node
-            HStack(spacing: 3) {
-                Text(light.name)
-                    .font(store.scaledFont(9.5, weight: .medium))
-                    .lineLimit(1)
-                if light.on {
-                    Text("\(Int(light.bri.rounded()))%")
-                        .font(store.scaledFont(8.5).monospacedDigit())
-                        .foregroundStyle(.secondary)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(bgFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(
+                            (isSelected || isArmedSource) ? store.skinAccentColor : (isActive ? Color.white.opacity(0.9) : accentColor.opacity(sensor.enabled ? 0.65 : 0.30)),
+                            lineWidth: (isSelected || isArmedSource) ? 2.4 : 1.5
+                        )
+                )
+                .shadow(color: isActive ? accentColor.opacity(0.6) : Color.black.opacity(0.18), radius: isActive ? 7 : 2)
+                .frame(width: nodeSize, height: nodeSize)
+
+            Image(systemName: symbol)
+                .font(.system(size: nodeSize * 0.46, weight: .semibold))
+                .foregroundStyle(fgColor)
+                .opacity(sensor.enabled ? 1.0 : 0.5)
+        }
+        .frame(width: nodeSize, height: nodeSize)
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .onHover { hovering in
+            isHovered = hovering
+            onHoverChanged(hovering)
+        }
+        .overlay(alignment: .top) {
+            if isHovered {
+                VStack(spacing: 1) {
+                    Text(sensor.name)
+                        .font(store.scaledFont(10.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if !statusText.isEmpty {
+                        Text(statusText)
+                            .font(store.scaledFont(9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
-                if let band = synthBand {
-                    Text(band.rawValue.uppercased())
-                        .font(.system(size: 7.5, weight: .bold))
-                        .foregroundStyle(Color(hex: "#d946ef"))
+                .fixedSize()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3.5)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.regularMaterial))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.16), lineWidth: 0.75))
+                .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
+                .offset(y: -36)
+                .allowsHitTesting(false)
+                .zIndex(100)
+            }
+        }
+        .help(statusText.isEmpty ? sensor.name : "\(sensor.name) · \(statusText)")
+        .onTapGesture { onTap() }
+        .contextMenu {
+            if sensor.kind == "motion" || sensor.kind == "contact" {
+                Button(sensor.enabled ? store.tr("Disable") : store.tr("Enable")) {
+                    store.setSensorEnabled(sensor, enabled: !sensor.enabled)
                 }
             }
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1.5)
-            .background(Capsule().fill(.ultraThinMaterial))
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5))
-            .onTapGesture { onInspect() }
+            Button(store.tr("Wire from here")) {
+                onWireFromHere()
+            }
+            Divider()
+            Button(store.tr("Remove from map"), role: .destructive) {
+                store.unplaceSensor(sensor.id)
+            }
         }
+        .gesture(
+            DragGesture(minimumDistance: 2, coordinateSpace: .named("floorplanCanvas"))
+                .onChanged { value in
+                    if mode == .map {
+                        onMove(value.location, false)
+                    } else {
+                        onWireDragChanged(value.location)
+                    }
+                }
+                .onEnded { value in
+                    if mode == .map {
+                        onMove(value.location, true)
+                    } else {
+                        onWireDragEnded(value.location)
+                    }
+                }
+        )
     }
 }
 
@@ -2224,6 +2777,46 @@ private struct RoomBoxInspectorPopover: View {
                 }
             }
 
+            if let roomID = box.hueID, let area = store.motionArea(forRoom: roomID) {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(area.enabled && area.motion ? Color(hex: "#10b981") : Color(hex: "#06b6d4"))
+                        Text(store.tr("MotionAware™"))
+                            .font(store.scaledFont(10.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if area.enabled && area.motion {
+                            Text(store.tr("Presence"))
+                                .font(store.scaledFont(9.5, weight: .semibold))
+                                .foregroundStyle(Color(hex: "#10b981"))
+                        }
+                    }
+
+                    Toggle(store.tr("Enabled"), isOn: Binding(
+                        get: { area.enabled },
+                        set: { store.updateMotionArea(area, enabled: $0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .font(store.scaledFont(11.5))
+
+                    if let sens = area.sensitivity {
+                        let maxSens = max(1, area.sensitivityMax ?? 4)
+                        Stepper(value: Binding(
+                            get: { sens },
+                            set: { store.updateMotionArea(area, sensitivity: $0) }
+                        ), in: 0...maxSens) {
+                            Text(store.trf("Sensitivity: {0}/{1}", [String(sens), String(maxSens)]))
+                                .font(store.scaledFont(11.5))
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            }
+
             Divider()
 
             HStack {
@@ -2281,340 +2874,451 @@ private struct RoomBoxInspectorPopover: View {
     }
 }
 
-// MARK: - Lamp Map Inspector Popover (Power, Brightness, Color, Themes, Rename, Z-Height)
+// MARK: - Floorplan Background Sheet
 
-private struct LampMapInspectorPopover: View {
+private struct FloorplanBackgroundSheet: View {
     @EnvironmentObject var store: HueStore
-    let light: HueLight
-    let placement: FloorplanLampPlacement
-    let onClose: () -> Void
-
-    @State private var nameDraft: String = ""
-    @State private var briDraft: Double = 80
-    @State private var zDraft: Double = 0
-    @State private var iconDraft: LampIcon = .bulb
-
-    private static let quickSwatches: [String] = [
-        "#ffd27a", "#ff8a3d", "#ff3b5c", "#38d9c0", "#38bdf8", "#a855f7", "#ffffff",
-    ]
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let liveLight = store.snapshot.light(light.id) ?? light
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                TextField(store.tr("Lamp name"), text: $nameDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .onSubmit { commitRename() }
-                Button(store.tr("Rename")) { commitRename() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(nameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nameDraft == liveLight.name)
-            }
-
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Toggle(isOn: Binding(
-                    get: { liveLight.on },
-                    set: { store.setLight(liveLight, on: $0) }
-                )) {
-                    Text(liveLight.on ? store.tr("On") : store.tr("Off"))
-                        .font(store.scaledFont(11.5, weight: .medium))
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-
+                Text(store.tr("Floorplan Background"))
+                    .font(store.scaledFont(14, weight: .semibold))
                 Spacer()
-
-                if liveLight.dimmable {
-                    Text("\(Int(briDraft.rounded()))%")
-                        .font(store.scaledFont(11).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if liveLight.dimmable {
-                Slider(value: $briDraft, in: 1...100, onEditingChanged: { editing in
-                    if !editing {
-                        store.setLight(liveLight, bri: Int(briDraft.rounded()))
-                    }
-                })
-                .controlSize(.small)
-            }
-
-            if liveLight.supportsColor || liveLight.supportsCT {
-                HStack(spacing: 7) {
-                    ForEach(Self.quickSwatches, id: \.self) { hex in
-                        Button {
-                            if liveLight.supportsColor, let xy = HueColorMath.hexToXY(hex) {
-                                store.setLight(liveLight, xy: (xy.x, xy.y))
-                            } else if liveLight.supportsCT {
-                                store.setLight(liveLight, mirek: hex == "#ffffff" ? liveLight.mirekMin : 370)
-                            }
-                        } label: {
-                            Circle()
-                                .fill(Color(hex: hex))
-                                .overlay(Circle().strokeBorder(Color.primary.opacity(0.25), lineWidth: 0.75))
-                                .frame(width: 22, height: 22)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            // Quick Light Themes
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text(store.tr("Themes").uppercased())
-                        .font(store.scaledFont(9.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(store.tr("Edit / Create Theme …")) {
-                        onClose()
-                        store.themeEditorLight = liveLight
+                if store.floorplan.background.fileName != nil {
+                    Button(role: .destructive) {
+                        store.clearFloorplanBackground()
+                    } label: {
+                        Text(store.tr("Clear"))
+                            .font(store.scaledFont(11.5))
                     }
                     .buttonStyle(.borderless)
-                    .font(store.scaledFont(10))
-                }
-                FlowLayout(spacing: 4) {
-                    ForEach(Array(store.allThemes.prefix(4))) { theme in
-                        Button {
-                            store.applyTheme(theme, to: liveLight)
-                        } label: {
-                            HStack(spacing: 3) {
-                                Circle().fill(Color(hex: theme.hex)).frame(width: 7, height: 7)
-                                Text(theme.name).font(store.scaledFont(10)).lineLimit(1)
-                            }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.primary.opacity(0.07)))
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
             }
 
-            Divider()
+            Button {
+                chooseBackgroundImagePanel()
+            } label: {
+                Label(store.tr("Choose Image…"), systemImage: "photo.on.rectangle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
 
-            // Spatial fixture icon grid (12 selectable macOS 13+ SF Symbols)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(store.tr("Lamp Icon").uppercased())
-                    .font(store.scaledFont(9.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
-                    ForEach(LampIcon.allCases) { icon in
-                        let selected = iconDraft == icon
-                        Button {
-                            iconDraft = icon
-                            store.updateLampPlacement(light.id, icon: icon)
-                        } label: {
-                            VStack(spacing: 2) {
-                                Image(systemName: icon.sfSymbol(lit: true))
-                                    .font(.system(size: 13, weight: .medium))
-                                Text(store.tr(icon.titleKey))
-                                    .font(store.scaledFont(8.5))
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 5)
-                            .foregroundStyle(selected ? Color.white : Color.primary)
-                            .background(
-                                RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
-                                    .fill(selected ? store.skinAccentColor : Color.primary.opacity(0.06))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .help(store.tr(icon.titleKey))
-                    }
-                }
+            if let err = store.floorplanBackgroundError {
+                Text(err)
+                    .font(store.scaledFont(11))
+                    .foregroundStyle(Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Text(store.tr("3D Height (Entertainment)"))
-                        .font(store.scaledFont(10.5))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(String(format: "%.2f", zDraft))
-                        .font(store.scaledFont(10).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Slider(value: $zDraft, in: -1.0...1.0, step: 0.05)
+            if store.floorplanBackgroundImage != nil {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(store.tr("Opacity"))
+                            .font(store.scaledFont(11.5, weight: .medium))
+                        Spacer()
+                        Text("\(Int((store.floorplan.background.opacity * 100).rounded()))%")
+                            .font(store.scaledFont(11.5).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { store.floorplan.background.opacity },
+                            set: { store.setFloorplanBackgroundOpacity($0) }
+                        ),
+                        in: FloorplanBackground.minOpacity...FloorplanBackground.maxOpacity
+                    )
                     .controlSize(.small)
-                    .onChange(of: zDraft) { val in
-                        store.updateLampPlacement(light.id, z: val)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(store.tr("Scaling"))
+                        .font(store.scaledFont(11.5, weight: .medium))
+                    Picker("", selection: Binding(
+                        get: { store.floorplan.background.fit },
+                        set: { store.setFloorplanBackgroundFit($0) }
+                    )) {
+                        Text(store.tr("Contain")).tag(BackgroundFit.contain)
+                        Text(store.tr("Cover")).tag(BackgroundFit.cover)
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                }
+            } else {
+                Text(store.tr("Place a PNG, JPEG, HEIC, or WebP floorplan behind your rooms and lamps."))
+                    .font(store.scaledFont(11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+
+            HStack {
+                Spacer()
+                Button(store.tr("Done")) { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 310)
+        .fontDesign(store.fontDesign)
+    }
+
+    private func chooseBackgroundImagePanel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        var types: [UTType] = [.png, .jpeg, .heic]
+        if let webp = UTType(filenameExtension: "webp") {
+            types.append(webp)
+        }
+        panel.allowedContentTypes = types
+        if panel.runModal() == .OK, let url = panel.url {
+            store.setFloorplanBackground(from: url)
+        }
+    }
+}
+
+// MARK: - Focused Lamp Dialog Sheets (Brightness, Rename, Icon)
+
+private struct LampBrightnessSheet: View {
+    @EnvironmentObject var store: HueStore
+    @Environment(\.dismiss) private var dismiss
+
+    let lightID: String
+    @State private var briDraft: Double = 80
+
+    var body: some View {
+        let light = store.snapshot.light(lightID)
+        let chosenIcon = store.floorplan.lamps[lightID]?.icon ?? LampIcon.inferred(for: light?.name ?? "")
+
+        VStack(alignment: .leading, spacing: 14) {
+            if let light = light {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(light.on ? Color(hex: light.color) : Color.primary.opacity(0.14))
+                            .overlay(Circle().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.75))
+                            .shadow(color: light.on ? Color(hex: light.color).opacity(0.5) : .clear, radius: 5)
+                            .frame(width: 34, height: 34)
+                        Image(systemName: chosenIcon.sfSymbol(lit: light.on))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(light.on ? (prefersDarkGlyph(light.color) ? Color.black : Color.white) : Color.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(light.name)
+                            .font(store.scaledFont(13.5, weight: .semibold))
+                            .lineLimit(1)
+                        Text(light.on ? store.tr("On") : store.tr("Off"))
+                            .font(store.scaledFont(11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: Binding(
+                        get: { light.on },
+                        set: { store.setLight(light, on: $0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.small)
+                }
+
+                Divider()
+
+                if light.dimmable {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(store.tr("Brightness"))
+                                .font(store.scaledFont(11.5, weight: .medium))
+                            Spacer()
+                            Text("\(Int(briDraft.rounded()))%")
+                                .font(store.scaledFont(12, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        Slider(
+                            value: Binding(
+                                get: { briDraft },
+                                set: { val in
+                                    briDraft = val
+                                    store.drag(HueStore.target(light: light), to: val)
+                                }
+                            ),
+                            in: 1...100,
+                            onEditingChanged: { editing in
+                                if !editing {
+                                    store.release(HueStore.target(light: light))
+                                    store.setLight(light, on: true, bri: Int(briDraft.rounded()))
+                                }
+                            }
+                        )
+                    }
+                } else {
+                    Text(store.tr("This light only supports on and off."))
+                        .font(store.scaledFont(11.5))
+                        .foregroundStyle(.secondary)
+                }
             }
 
             HStack {
-                Button(role: .destructive) {
-                    store.unplaceLamp(light.id)
-                    onClose()
-                } label: {
-                    Text(store.tr("Remove from map"))
-                        .font(store.scaledFont(11))
-                }
-                .buttonStyle(.borderless)
                 Spacer()
-                Button(store.tr("Done")) {
-                    commitRename()
-                    onClose()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                Button(store.tr("Done")) { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(14)
-        .frame(width: 280)
+        .padding(18)
+        .frame(width: 310)
         .fontDesign(store.fontDesign)
         .onAppear {
-            nameDraft = light.name
-            briDraft = max(1, light.bri)
-            zDraft = placement.z
-            iconDraft = placement.icon
+            if let light = store.snapshot.light(lightID) {
+                briDraft = max(1, light.bri)
+            }
+        }
+    }
+}
+
+private struct LampRenameSheet: View {
+    @EnvironmentObject var store: HueStore
+    @Environment(\.dismiss) private var dismiss
+
+    let lightID: String
+    @State private var nameDraft: String = ""
+
+    var body: some View {
+        let light = store.snapshot.light(lightID)
+        let chosenIcon = store.floorplan.lamps[lightID]?.icon ?? LampIcon.inferred(for: light?.name ?? "")
+        let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let canRename = !trimmed.isEmpty && trimmed != (light?.name ?? "")
+
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill((light?.on ?? false) ? Color(hex: light?.color ?? HueColorMath.defaultWarmHex) : Color.primary.opacity(0.14))
+                        .overlay(Circle().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.75))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: chosenIcon.sfSymbol(lit: light?.on ?? false))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle((light?.on ?? false) ? (prefersDarkGlyph(light?.color ?? HueColorMath.defaultWarmHex) ? Color.black : Color.white) : Color.secondary)
+                }
+                Text(store.tr("Rename Lamp"))
+                    .font(store.scaledFont(14, weight: .semibold))
+            }
+
+            TextField(store.tr("Lamp name"), text: $nameDraft)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { commitRename() }
+
+            HStack {
+                Button(store.tr("Cancel")) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(store.tr("Rename")) { commitRename() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canRename)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 310)
+        .fontDesign(store.fontDesign)
+        .onAppear {
+            nameDraft = store.snapshot.light(lightID)?.name ?? ""
         }
     }
 
     private func commitRename() {
         let trimmed = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != light.name else { return }
-        store.renameLight(id: light.id, name: trimmed)
+        guard !trimmed.isEmpty, trimmed != (store.snapshot.light(lightID)?.name ?? "") else { return }
+        store.renameLight(id: lightID, name: trimmed)
+        dismiss()
     }
 }
 
-// MARK: - Wire Rule Inspector Popover (Click any Wire on Canvas)
-
-private struct WireRuleInspectorPopover: View {
-    @EnvironmentObject var store: HueStore
-    let rule: HueRule
-    let onClose: () -> Void
-
-    @State private var enabled: Bool = true
-    @State private var kind: String = "follow"
-    @State private var mirrorOff: Bool = false
-    @State private var matchBri: Bool = false
-    @State private var onlyIfOff: Bool = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(rule.name.isEmpty ? store.tr("Linked Rule") : rule.name)
-                    .font(store.scaledFont(12.5, weight: .semibold))
-                    .lineLimit(1)
-                Spacer()
-                Toggle("", isOn: $enabled)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .controlSize(.small)
-            }
-
-            Picker(store.tr("Rule type"), selection: $kind) {
-                Text(store.tr("Follow / Mirror")).tag("follow")
-                Text(store.tr("Exclusive")).tag("exclusive")
-                Text(store.tr("Companion")).tag("companion")
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-
-            if kind != "exclusive" {
-                VStack(alignment: .leading, spacing: 5) {
-                    Toggle(store.tr("Mirror off"), isOn: $mirrorOff)
-                    Toggle(store.tr("Match brightness"), isOn: $matchBri)
-                    Toggle(store.tr("Only if target is off"), isOn: $onlyIfOff)
-                }
-                .font(store.scaledFont(11.5))
-            } else {
-                Text(store.tr("Automatically turns target off when trigger turns on."))
-                    .font(store.scaledFont(10.5))
-                    .foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            HStack {
-                Button(role: .destructive) {
-                    store.deleteRule(rule)
-                    onClose()
-                } label: {
-                    Label(store.tr("Delete"), systemImage: "trash")
-                        .font(store.scaledFont(11))
-                }
-                .buttonStyle(.borderless)
-                Spacer()
-                Button(store.tr("Save")) {
-                    var updated = rule
-                    updated.enabled = enabled
-                    updated.kind = kind
-                    updated.mirrorOff = kind == "exclusive" ? false : mirrorOff
-                    updated.matchBri = kind == "exclusive" ? false : matchBri
-                    updated.onlyIfOff = kind == "exclusive" ? false : onlyIfOff
-                    if kind == "exclusive" {
-                        updated.targets = updated.targets.map {
-                            HueRuleTarget(kind: $0.kind, id: $0.id, action: "off", bri: nil, sceneID: nil)
-                        }
-                    } else {
-                        updated.targets = updated.targets.map {
-                            HueRuleTarget(kind: $0.kind, id: $0.id, action: "on", bri: $0.bri, sceneID: $0.sceneID)
-                        }
-                    }
-                    store.updateRule(updated)
-                    onClose()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-        }
-        .padding(14)
-        .frame(width: 265)
-        .fontDesign(store.fontDesign)
-        .onAppear {
-            enabled = rule.enabled
-            kind = rule.kind
-            mirrorOff = rule.mirrorOff
-            matchBri = rule.matchBri
-            onlyIfOff = rule.onlyIfOff
-        }
-    }
-}
-
-// MARK: - Quick Wire Creation Sheet (Drag Wire in Wire Mode)
-
-private struct QuickWireRuleSheet: View {
+private struct LampIconPickerSheet: View {
     @EnvironmentObject var store: HueStore
     @Environment(\.dismiss) private var dismiss
 
-    let source: MapView.WireEndpoint
-    let target: MapView.WireEndpoint
+    let lightID: String
 
+    var body: some View {
+        let light = store.snapshot.light(lightID)
+        let currentIcon = store.floorplan.lamps[lightID]?.icon ?? LampIcon.inferred(for: light?.name ?? "")
+        let isLit = light?.on ?? false
+        let lightHex = light?.color ?? HueColorMath.defaultWarmHex
+
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(isLit ? Color(hex: lightHex) : Color.primary.opacity(0.14))
+                        .overlay(Circle().strokeBorder(store.skinAccentColor.opacity(0.6), lineWidth: 1.5))
+                        .shadow(color: isLit ? Color(hex: lightHex).opacity(0.55) : .clear, radius: 6)
+                        .frame(width: 40, height: 40)
+                    Image(systemName: currentIcon.sfSymbol(lit: isLit))
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(isLit ? (prefersDarkGlyph(lightHex) ? Color.black : Color.white) : Color.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(light?.name ?? store.tr("Lamp Icon"))
+                        .font(store.scaledFont(13.5, weight: .semibold))
+                        .lineLimit(1)
+                    Text(store.tr(currentIcon.titleKey))
+                        .font(store.scaledFont(11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                ForEach(LampIcon.allCases) { icon in
+                    let selected = currentIcon == icon
+                    Button {
+                        store.setLampIcon(lightID, icon: icon)
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: icon.sfSymbol(lit: true))
+                                .font(.system(size: 16, weight: .medium))
+                            Text(store.tr(icon.titleKey))
+                                .font(store.scaledFont(9.5, weight: selected ? .semibold : .regular))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(selected ? Color.white : Color.primary)
+                        .background(
+                            RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
+                                .fill(selected ? store.skinAccentColor : store.cardBackgroundColor)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
+                                .strokeBorder(selected ? store.skinAccentColor : store.cardBorderColor, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(store.tr(icon.titleKey))
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button(store.tr("Done")) { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 360)
+        .fontDesign(store.fontDesign)
+    }
+}
+
+// MARK: - Unified Map Rule Dialog Sheet (Create by Drag/Click & Edit/Delete by Clicking Any Line)
+
+private struct MapRuleDialogSheet: View {
+    @EnvironmentObject var store: HueStore
+    @Environment(\.dismiss) private var dismiss
+
+    let state: MapView.RuleDialogState
+
+    @State private var enabled: Bool = true
     @State private var ruleKind: String = "follow"
+    @State private var triggerState: String = "on"
     @State private var mirrorOff: Bool = true
     @State private var matchBri: Bool = false
     @State private var onlyIfOff: Bool = false
+    @State private var useTimeWindow: Bool = false
+    @State private var timeStart: String = "22:00"
+    @State private var timeEnd: String = "06:00"
+    @State private var name: String = ""
+
+    private var existingRule: HueRule? {
+        if case .edit(let rule) = state { return rule }
+        return nil
+    }
+
+    private var endpoints: (source: MapView.WireEndpoint, target: MapView.WireEndpoint) {
+        switch state {
+        case .create(let src, let dst):
+            return (src, dst)
+        case .edit(let rule):
+            let src = MapView.WireEndpoint(kind: rule.triggerKind, id: rule.triggerID)
+            let firstTarget = rule.targets.first
+            let dst = MapView.WireEndpoint(kind: firstTarget?.kind ?? "light", id: firstTarget?.id ?? "")
+            return (src, dst)
+        }
+    }
+
+    private var wouldCreateCycle: Bool {
+        let draft = buildRule()
+        let others = store.rules.filter { $0.id != draft.id }
+        return !RuleEngine.detectCycles(others + [draft]).isEmpty
+    }
+
+    private var isSensorSource: Bool {
+        ["motion", "motion_area", "contact", "button"].contains(endpoints.source.kind)
+    }
+
+    private func defaultTriggerState(for kind: String) -> String {
+        switch kind {
+        case "motion", "motion_area": return "motion"
+        case "contact": return "open"
+        case "button": return "press"
+        default: return "on"
+        }
+    }
 
     var body: some View {
-        let srcName = store.nameForTarget(kind: source.kind, id: source.id)
-        let dstName = store.nameForTarget(kind: target.kind, id: target.id)
+        let ep = endpoints
+        let srcName = store.nameForTarget(kind: ep.source.kind, id: ep.source.id)
+        let dstName = ep.target.id.isEmpty ? "" : store.nameForTarget(kind: ep.target.kind, id: ep.target.id)
 
         VStack(alignment: .leading, spacing: 14) {
-            Text(store.tr("Link on Floorplan"))
-                .font(store.scaledFont(14, weight: .semibold))
+            // Header
+            HStack {
+                Text(existingRule == nil ? store.tr("New Rule") : store.tr("Edit Rule"))
+                    .font(store.scaledFont(14, weight: .semibold))
+                Spacer()
+                if existingRule != nil {
+                    Toggle("", isOn: $enabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .help(store.tr("Enabled"))
+                }
+            }
 
+            // Source -> Target badge strip
             HStack(spacing: 8) {
                 Text(srcName)
                     .font(store.scaledFont(12, weight: .semibold))
-                    .padding(.horizontal, 8)
+                    .lineLimit(1)
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(Color.primary.opacity(0.08)))
                 Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Text(dstName)
                     .font(store.scaledFont(12, weight: .semibold))
-                    .padding(.horizontal, 8)
+                    .lineLimit(1)
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(Color.primary.opacity(0.08)))
+                Spacer(minLength: 0)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
+            // Rule type
+            VStack(alignment: .leading, spacing: 5) {
                 Text(store.tr("Rule type"))
                     .font(store.scaledFont(11, weight: .semibold))
                     .foregroundStyle(.secondary)
@@ -2627,10 +3331,39 @@ private struct QuickWireRuleSheet: View {
                 .pickerStyle(.segmented)
             }
 
+            // Trigger state
             if ruleKind != "exclusive" {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(store.tr("When"))
+                        .font(store.scaledFont(11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $triggerState) {
+                        switch ep.source.kind {
+                        case "motion", "motion_area":
+                            Text(store.tr("Motion detected")).tag("motion")
+                            Text(store.tr("No motion")).tag("clear")
+                        case "contact":
+                            Text(store.tr("Opens")).tag("open")
+                            Text(store.tr("Closes")).tag("closed")
+                        case "button":
+                            Text(store.tr("Pressed")).tag("press")
+                            Text(store.tr("Long press")).tag("long_press")
+                        default:
+                            Text(store.tr("Turns on")).tag("on")
+                            Text(store.tr("Turns off")).tag("off")
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                }
+
                 VStack(alignment: .leading, spacing: 6) {
-                    Toggle(store.tr("Mirror off"), isOn: $mirrorOff)
-                    Toggle(store.tr("Match brightness"), isOn: $matchBri)
+                    if ep.source.kind != "button" {
+                        Toggle(store.tr("Also turn off together"), isOn: $mirrorOff)
+                    }
+                    if !isSensorSource {
+                        Toggle(store.tr("Match brightness"), isOn: $matchBri)
+                    }
                     Toggle(store.tr("Only if target is off"), isOn: $onlyIfOff)
                 }
                 .font(store.scaledFont(12))
@@ -2640,36 +3373,153 @@ private struct QuickWireRuleSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            Spacer()
+            // Optional HH:MM active time window
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(store.tr("Active only during time window"), isOn: $useTimeWindow)
+                    .font(store.scaledFont(12))
+                if useTimeWindow {
+                    HStack(spacing: 8) {
+                        TextField("22:00", text: $timeStart)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                        Text("–")
+                        TextField("06:00", text: $timeEnd)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                    }
+                }
+            }
+
+            // Optional Name
+            VStack(alignment: .leading, spacing: 4) {
+                Text(store.tr("Name"))
+                    .font(store.scaledFont(11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                TextField("\(srcName) → \(dstName)", text: $name)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            if wouldCreateCycle {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.orange)
+                    Text(store.tr("This rule creates a cycle with existing rules."))
+                        .font(store.scaledFont(11))
+                        .foregroundStyle(Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Divider()
 
             HStack {
+                if let rule = existingRule {
+                    Button(role: .destructive) {
+                        store.deleteRule(rule)
+                        dismiss()
+                    } label: {
+                        Label(store.tr("Delete"), systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer()
+
                 Button(store.tr("Cancel")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button(store.tr("Create Link")) {
-                    let action = ruleKind == "exclusive" ? "off" : "on"
-                    let rule = HueRule(
-                        name: "\(srcName) → \(dstName)",
-                        enabled: true,
-                        kind: ruleKind,
-                        triggerKind: source.kind,
-                        triggerID: source.id,
-                        triggerState: "on",
-                        targets: [HueRuleTarget(kind: target.kind, id: target.id, action: action)],
-                        mirrorOff: ruleKind == "exclusive" ? false : mirrorOff,
-                        matchBri: ruleKind == "exclusive" ? false : matchBri,
-                        onlyIfOff: ruleKind == "exclusive" ? false : onlyIfOff
-                    )
-                    store.addRule(rule)
+
+                Button(store.tr("Save")) {
+                    let rule = buildRule()
+                    if existingRule != nil {
+                        store.updateRule(rule)
+                    } else {
+                        store.addRule(rule)
+                    }
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(16)
-        .frame(width: 340, height: 290)
+        .padding(18)
+        .frame(width: 380)
         .fontDesign(store.fontDesign)
+        .onAppear {
+            let srcKind = endpoints.source.kind
+            if let rule = existingRule {
+                enabled = rule.enabled
+                ruleKind = (rule.kind == "exclusive" || rule.kind == "companion") ? rule.kind : "follow"
+                triggerState = rule.triggerState.isEmpty ? defaultTriggerState(for: srcKind) : rule.triggerState
+                mirrorOff = rule.mirrorOff
+                matchBri = rule.matchBri
+                onlyIfOff = rule.onlyIfOff
+                useTimeWindow = !rule.timeStart.isEmpty && !rule.timeEnd.isEmpty
+                if !rule.timeStart.isEmpty { timeStart = rule.timeStart }
+                if !rule.timeEnd.isEmpty { timeEnd = rule.timeEnd }
+                name = rule.name
+            } else {
+                enabled = true
+                ruleKind = "follow"
+                triggerState = defaultTriggerState(for: srcKind)
+                mirrorOff = srcKind != "button"
+                matchBri = false
+                onlyIfOff = false
+                useTimeWindow = false
+                name = ""
+            }
+        }
+    }
+
+    private func buildRule() -> HueRule {
+        let ep = endpoints
+        let srcName = store.nameForTarget(kind: ep.source.kind, id: ep.source.id)
+        let dstName = store.nameForTarget(kind: ep.target.kind, id: ep.target.id)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalName = trimmedName.isEmpty ? "\(srcName) → \(dstName)" : trimmedName
+        let finalAction = ruleKind == "exclusive" ? "off" : "on"
+        let activeState = defaultTriggerState(for: ep.source.kind)
+        let finalTriggerState = ruleKind == "exclusive" ? activeState : triggerState
+        let startStr = useTimeWindow ? timeStart.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let endStr = useTimeWindow ? timeEnd.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let allowMirrorOff = ruleKind != "exclusive" && ep.source.kind != "button"
+        let allowMatchBri = ruleKind != "exclusive" && !isSensorSource
+
+        if var updated = existingRule {
+            updated.name = finalName
+            updated.enabled = enabled
+            updated.kind = ruleKind
+            updated.triggerState = finalTriggerState
+            updated.mirrorOff = allowMirrorOff ? mirrorOff : false
+            updated.matchBri = allowMatchBri ? matchBri : false
+            updated.onlyIfOff = ruleKind == "exclusive" ? false : onlyIfOff
+            updated.timeStart = startStr
+            updated.timeEnd = endStr
+            updated.targets = updated.targets.map {
+                HueRuleTarget(
+                    kind: $0.kind,
+                    id: $0.id,
+                    action: finalAction,
+                    bri: ruleKind == "exclusive" ? nil : $0.bri,
+                    sceneID: ruleKind == "exclusive" ? nil : $0.sceneID
+                )
+            }
+            return updated
+        }
+
+        return HueRule(
+            name: finalName,
+            enabled: true,
+            kind: ruleKind,
+            triggerKind: ep.source.kind,
+            triggerID: ep.source.id,
+            triggerState: finalTriggerState,
+            targets: [HueRuleTarget(kind: ep.target.kind, id: ep.target.id, action: finalAction)],
+            mirrorOff: allowMirrorOff ? mirrorOff : false,
+            matchBri: allowMatchBri ? matchBri : false,
+            timeStart: startStr,
+            timeEnd: endStr,
+            onlyIfOff: ruleKind == "exclusive" ? false : onlyIfOff
+        )
     }
 }
 

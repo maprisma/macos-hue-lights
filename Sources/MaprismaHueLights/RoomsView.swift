@@ -261,12 +261,12 @@ struct RoomCard: View {
 
     private var cardFill: Color {
         if let tint = tint { return tint.opacity(0.14) }
-        return Color.primary.opacity(0.05)
+        return store.cardBackgroundColor
     }
 
     private var cardBorder: Color {
         if let tint = tint { return tint.opacity(0.45) }
-        return Color.primary.opacity(0.08)
+        return store.cardBorderColor
     }
 
     var body: some View {
@@ -274,6 +274,8 @@ struct RoomCard: View {
         let favKey = HueStore.favoriteKey(room: room)
         let isFav = store.isFavorite(favKey)
         let isExcluded = store.isExcludedFromAllOn(room.id)
+        let motionArea = store.motionArea(forRoom: room.hueID)
+        let hasPresence = motionArea.map { $0.enabled && $0.motion } ?? false
 
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -307,6 +309,25 @@ struct RoomCard: View {
                                     Image(systemName: "link")
                                         .font(.system(size: 9))
                                         .foregroundStyle(.secondary)
+                                }
+                                if let area = motionArea, area.enabled {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "dot.radiowaves.left.and.right")
+                                            .font(.system(size: 8.5, weight: .semibold))
+                                        if hasPresence {
+                                            Text(store.tr("Presence"))
+                                                .font(store.scaledFont(9, weight: .semibold))
+                                        }
+                                    }
+                                    .foregroundStyle(hasPresence ? Color(hex: "#10b981") : Color(hex: "#06b6d4"))
+                                    .padding(.horizontal, hasPresence ? 5 : 3)
+                                    .padding(.vertical, 1.5)
+                                    .background(
+                                        Capsule().fill(
+                                            (hasPresence ? Color(hex: "#10b981") : Color(hex: "#06b6d4")).opacity(hasPresence ? 0.16 : 0.10)
+                                        )
+                                    )
+                                    .help(hasPresence ? store.tr("MotionAware presence detected") : store.tr("MotionAware active"))
                                 }
                             }
                             Text(store.l10n.roomStatus(room))
@@ -495,6 +516,12 @@ struct LightRow: View {
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
                         .help(store.tr("Linked by rule"))
+                }
+                if light.motionAware {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(light.motionActive ? Color(hex: "#10b981") : Color(hex: "#06b6d4"))
+                        .help(light.motionActive ? store.tr("MotionAware presence detected") : store.tr("MotionAware™"))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -742,16 +769,27 @@ struct ChipStyle: ButtonStyle {
     var subtle = false
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.caption.weight(active ? .semibold : .regular))
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .foregroundStyle(active ? Color.white : (subtle ? Color.accentColor : Color.primary))
-            .background(Capsule().fill(active ? Color.accentColor : Color.primary.opacity(subtle ? 0 : 0.08)))
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(active ? 0 : 0.1), lineWidth: 0.5))
-            .contentShape(Capsule())
-            .opacity(configuration.isPressed ? 0.7 : 1)
+        ChipBody(configuration: configuration, active: active, subtle: subtle)
+    }
+
+    private struct ChipBody: View {
+        @EnvironmentObject var store: HueStore
+        let configuration: ButtonStyleConfiguration
+        let active: Bool
+        let subtle: Bool
+
+        var body: some View {
+            configuration.label
+                .font(.caption.weight(active ? .semibold : .regular))
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .foregroundStyle(active ? Color.white : (subtle ? store.skinAccentColor : Color.primary))
+                .background(Capsule().fill(active ? store.skinAccentColor : Color.primary.opacity(subtle ? 0 : 0.08)))
+                .overlay(Capsule().strokeBorder(active ? Color.clear : store.cardBorderColor, lineWidth: 0.75))
+                .contentShape(Capsule())
+                .opacity(configuration.isPressed ? 0.7 : 1)
+        }
     }
 }
 

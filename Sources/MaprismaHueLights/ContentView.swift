@@ -25,6 +25,8 @@ struct ContentView: View {
                 switch store.page {
                 case .settings:
                     SettingsView()
+                case .help:
+                    HelpView()
                 case .main:
                     MainView(mode: mode)
                 }
@@ -39,11 +41,23 @@ struct ContentView: View {
         .sheet(item: $store.themeEditorLight) { light in
             LightThemesSheet(light: light)
                 .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .preferredColorScheme(store.preferredColorScheme)
+        }
+        .sheet(isPresented: $store.showAskAISheet) {
+            if store.askAIEnabled {
+                AskAIView()
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .fontDesign(store.fontDesign)
+                    .preferredColorScheme(store.preferredColorScheme)
+            }
         }
         .background(
             WindowObserver(
                 mode: mode,
                 savedFrame: mode == .detached ? store.savedWindowFrame() : nil,
+                preferredColorScheme: store.preferredColorScheme,
                 onChange: { open in store.setPanel(open: open) },
                 onFrameChange: mode == .detached ? { frame in store.saveWindowFrame(frame) } : nil
             )
@@ -61,27 +75,33 @@ private struct WindowBackdropView: View {
             store.windowBackground
             if store.skin == .synthwave {
                 LinearGradient(
-                    colors: [Color(hex: "#ff2e93").opacity(0.10), Color.clear, Color(hex: "#00f0ff").opacity(0.08)],
+                    colors: [Color(hex: "#ff2e93").opacity(0.16), Color.clear, Color(hex: "#00f0ff").opacity(0.12)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             } else if store.skin == .discoLava {
                 LinearGradient(
-                    colors: [Color(hex: "#ff5e7e").opacity(0.14), Color(hex: "#a855f7").opacity(0.12)],
+                    colors: [Color(hex: "#ff5e7e").opacity(0.18), Color(hex: "#a855f7").opacity(0.15)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             } else if store.skin == .cozyCabin {
                 LinearGradient(
-                    colors: [Color(hex: "#e59838").opacity(0.08), Color.clear],
+                    colors: [Color(hex: "#e59838").opacity(0.12), Color(hex: "#a45a2a").opacity(0.06)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
             } else if store.skin == .retroTerminal {
                 LinearGradient(
-                    colors: [Color(hex: "#33ff66").opacity(0.06), Color.clear],
+                    colors: [Color(hex: "#33ff66").opacity(0.10), Color.clear],
                     startPoint: .top,
                     endPoint: .bottom
+                )
+            } else if store.skin == .minimalZen {
+                LinearGradient(
+                    colors: [Color(hex: "#94a3b8").opacity(0.10), Color(hex: "#64748b").opacity(0.06)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
             }
         }
@@ -157,6 +177,32 @@ struct HeaderView: View {
                 .buttonStyle(.borderless)
                 .help(store.tr("Open in window"))
             }
+            if store.askAIEnabled {
+                Button {
+                    store.showAskAISheet = true
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(store.skinAccentColor)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("k", modifiers: .command)
+                .help(store.tr("Ask AI (⌘K)"))
+            }
+
+            Button {
+                store.page = store.page == .help ? .main : .help
+            } label: {
+                Image(systemName: store.page == .help ? "questionmark.circle.fill" : "questionmark.circle")
+                    .font(.system(size: 14))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help(store.tr("Help & Guide"))
+
             Button {
                 store.page = store.page == .settings ? .main : .settings
             } label: {
@@ -187,7 +233,11 @@ struct TabBarView: View {
         .padding(3)
         .background(
             RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
-                .fill(Color.primary.opacity(0.06))
+                .fill(store.cardBackgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
+                .strokeBorder(store.cardBorderColor, lineWidth: 0.75)
         )
     }
 
@@ -357,6 +407,7 @@ struct FooterView: View {
 struct WindowObserver: NSViewRepresentable {
     let mode: ContentView.DisplayMode
     let savedFrame: SavedWindowFrame?
+    let preferredColorScheme: ColorScheme?
     let onChange: (Bool) -> Void
     let onFrameChange: ((SavedWindowFrame) -> Void)?
 
@@ -364,6 +415,7 @@ struct WindowObserver: NSViewRepresentable {
         let view = ObserverView()
         view.mode = mode
         view.savedFrame = savedFrame
+        view.preferredColorScheme = preferredColorScheme
         view.onChange = onChange
         view.onFrameChange = onFrameChange
         return view
@@ -371,18 +423,37 @@ struct WindowObserver: NSViewRepresentable {
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
         nsView.mode = mode
+        nsView.preferredColorScheme = preferredColorScheme
         nsView.onChange = onChange
         nsView.onFrameChange = onFrameChange
+        nsView.applyWindowAppearance()
     }
 
     final class ObserverView: NSView {
         var mode: ContentView.DisplayMode = .popover
         var savedFrame: SavedWindowFrame?
+        var preferredColorScheme: ColorScheme?
         var onChange: ((Bool) -> Void)?
         var onFrameChange: ((SavedWindowFrame) -> Void)?
         private weak var observed: NSWindow?
         private var restoredWindow = false
         private var saveWorkItem: DispatchWorkItem?
+
+        func applyWindowAppearance() {
+            guard let window = observed ?? self.window else { return }
+            let target: NSAppearance?
+            switch preferredColorScheme {
+            case .dark:
+                target = NSAppearance(named: .darkAqua)
+            case .light:
+                target = NSAppearance(named: .aqua)
+            case nil:
+                target = nil
+            }
+            if window.appearance != target {
+                window.appearance = target
+            }
+        }
 
         deinit {
             saveWorkItem?.cancel()
@@ -402,6 +473,7 @@ struct WindowObserver: NSViewRepresentable {
             center.removeObserver(self, name: NSApplication.willTerminateNotification, object: nil)
             observed = window
             guard let window = window else { return }
+            applyWindowAppearance()
             center.addObserver(self, selector: #selector(becameKey(_:)),
                                name: NSWindow.didBecomeKeyNotification, object: window)
             center.addObserver(self, selector: #selector(resignedKey(_:)),

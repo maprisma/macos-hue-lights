@@ -242,6 +242,68 @@ struct SettingsView: View {
                     }
 
                     SettingsSection(
+                        title: store.tr("Ask AI"),
+                        description: store.tr("Optional local-first assistant to switch lights, create rules, and schedule in plain language. Off by default — turn on anytime.")
+                    ) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Toggle(isOn: Binding(
+                                get: { store.askAIEnabled },
+                                set: { store.setAskAIEnabled($0) }
+                            )) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(store.tr("Enable Ask AI"))
+                                        .font(store.scaledFont(12.5, weight: .medium))
+                                    Text(store.tr("Shows the ✨ Ask AI button (⌘K) in the header. When off, Ask AI is completely hidden and inactive."))
+                                        .font(store.scaledFont(11))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+
+                            if store.askAIEnabled {
+                                Divider()
+
+                                settingRow(
+                                    label: store.tr("Local Ollama URL (optional)"),
+                                    caption: store.tr("Loopback only (127.0.0.1 or localhost). Used only if the built-in offline parser finds no direct match.")
+                                ) {
+                                    TextField(
+                                        AppSettings.defaultAskAIOllamaURL,
+                                        text: Binding(
+                                            get: { store.askAIOllamaURL },
+                                            set: { store.setAskAIOllamaURL($0) }
+                                        )
+                                    )
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(store.scaledFont(11.5))
+                                }
+
+                                if !HueAskAIEngine.isValidLoopbackURL(store.askAIOllamaURL) {
+                                    Text(store.tr("Only local loopback URLs (127.0.0.1 or localhost) are permitted."))
+                                        .font(store.scaledFont(10.5))
+                                        .foregroundStyle(Color.orange)
+                                }
+
+                                settingRow(
+                                    label: store.tr("Local Ollama model (optional)"),
+                                    caption: store.tr("Leave empty to use llama3.2 when Ollama is running locally.")
+                                ) {
+                                    TextField(
+                                        "llama3.2",
+                                        text: Binding(
+                                            get: { store.askAIModel },
+                                            set: { store.setAskAIModel($0) }
+                                        )
+                                    )
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(store.scaledFont(11.5))
+                                }
+                            }
+                        }
+                    }
+
+                    SettingsSection(
                         title: store.tr("General"),
                         description: store.tr("Startup behavior and safety confirmation for master light controls.")
                     ) {
@@ -473,7 +535,11 @@ struct SettingsSection<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                    .fill(Color.primary.opacity(0.05))
+                    .fill(store.cardBackgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                    .strokeBorder(store.cardBorderColor, lineWidth: 1)
             )
             if !description.isEmpty {
                 Text(description)

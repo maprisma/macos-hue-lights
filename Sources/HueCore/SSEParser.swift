@@ -4,9 +4,12 @@ import Foundation
 public struct HueSSEUpdate: Equatable, Sendable {
     /// "update", "add", or "delete"
     public let eventType: String
-    /// "light", "grouped_light", "scene", "behavior_instance", etc.
+    /// "light", "grouped_light", "scene", "behavior_instance", "motion", "contact", "button",
+    /// "temperature", "light_level", "device_power", "convenience_area_motion",
+    /// "security_area_motion", "motion_area_configuration", etc.
     public let resourceType: String
     public let resourceID: String
+    public let ownerID: String?
     public let on: Bool?
     public let brightness: Double?
     public let colorHex: String?
@@ -14,22 +17,44 @@ public struct HueSSEUpdate: Equatable, Sendable {
     public let effect: String?
     public let sceneActive: Bool?
     public let name: String?
+    public let enabled: Bool?
+    public let motion: Bool?
+    public let motionValid: Bool?
+    public let contactOpen: Bool?
+    public let buttonEvent: String?
+    public let temperature: Double?
+    public let lux: Double?
+    public let battery: Int?
+    public let batteryState: String?
+    public let sensitivity: Int?
 
     public init(
         eventType: String,
         resourceType: String,
         resourceID: String,
+        ownerID: String? = nil,
         on: Bool? = nil,
         brightness: Double? = nil,
         colorHex: String? = nil,
         mirek: Int? = nil,
         effect: String? = nil,
         sceneActive: Bool? = nil,
-        name: String? = nil
+        name: String? = nil,
+        enabled: Bool? = nil,
+        motion: Bool? = nil,
+        motionValid: Bool? = nil,
+        contactOpen: Bool? = nil,
+        buttonEvent: String? = nil,
+        temperature: Double? = nil,
+        lux: Double? = nil,
+        battery: Int? = nil,
+        batteryState: String? = nil,
+        sensitivity: Int? = nil
     ) {
         self.eventType = eventType
         self.resourceType = resourceType
         self.resourceID = resourceID
+        self.ownerID = ownerID
         self.on = on
         self.brightness = brightness
         self.colorHex = colorHex
@@ -37,6 +62,16 @@ public struct HueSSEUpdate: Equatable, Sendable {
         self.effect = effect
         self.sceneActive = sceneActive
         self.name = name
+        self.enabled = enabled
+        self.motion = motion
+        self.motionValid = motionValid
+        self.contactOpen = contactOpen
+        self.buttonEvent = buttonEvent
+        self.temperature = temperature
+        self.lux = lux
+        self.battery = battery
+        self.batteryState = batteryState
+        self.sensitivity = sensitivity
     }
 }
 
@@ -156,17 +191,102 @@ public struct SSEParser: Sendable {
                     sceneActive = (status != "inactive")
                 }
 
+                let ownerID = (item["owner"] as? [String: Any])?["rid"] as? String
+                let enabled = item["enabled"] as? Bool
+
+                var motion: Bool? = nil
+                var motionValid: Bool? = nil
+                if let mDict = item["motion"] as? [String: Any] {
+                    if let m = mDict["motion"] as? Bool {
+                        motion = m
+                    } else if let rep = mDict["motion_report"] as? [String: Any], let m = rep["motion"] as? Bool {
+                        motion = m
+                    }
+                    motionValid = mDict["motion_valid"] as? Bool
+                }
+
+                var contactOpen: Bool? = nil
+                if rtype == "contact",
+                   let rep = item["contact_report"] as? [String: Any],
+                   let state = rep["state"] as? String {
+                    if state == "no_contact" {
+                        contactOpen = true
+                    } else if state == "contact" {
+                        contactOpen = false
+                    }
+                }
+
+                var buttonEvent: String? = nil
+                if rtype == "button", let bDict = item["button"] as? [String: Any] {
+                    if let rep = bDict["button_report"] as? [String: Any], let ev = rep["event"] as? String, !ev.isEmpty {
+                        buttonEvent = ev
+                    } else if let ev = bDict["last_event"] as? String, !ev.isEmpty {
+                        buttonEvent = ev
+                    }
+                }
+
+                var temperature: Double? = nil
+                if rtype == "temperature", let tDict = item["temperature"] as? [String: Any] {
+                    let rawTemp = tDict["temperature"] ?? (tDict["temperature_report"] as? [String: Any])?["temperature"]
+                    if let t = HueColorMath.finite(rawTemp, low: -50.0, high: 120.0) {
+                        temperature = (t * 10.0).rounded() / 10.0
+                    }
+                }
+
+                var lux: Double? = nil
+                if rtype == "light_level", let lDict = item["light"] as? [String: Any] {
+                    let rawLL = lDict["light_level"] ?? (lDict["light_level_report"] as? [String: Any])?["light_level"]
+                    if let ll = HueColorMath.finite(rawLL, low: 0.0, high: 65535.0) {
+                        if ll <= 0 {
+                            lux = 0.0
+                        } else {
+                            let val = pow(10.0, (ll - 1.0) / 10000.0)
+                            lux = (val * 10.0).rounded() / 10.0
+                        }
+                    }
+                }
+
+                var battery: Int? = nil
+                var batteryState: String? = nil
+                if rtype == "device_power", let pDict = item["power_state"] as? [String: Any] {
+                    if let lvl = JSONValue.optionalInt(pDict, "battery_level") {
+                        battery = HueColorMath.clamp(lvl, 0, 100)
+                    }
+                    if let st = pDict["battery_state"] as? String, !st.isEmpty {
+                        batteryState = st
+                    }
+                }
+
+                let sensitivity: Int? = {
+                    if let sDict = item["sensitivity"] as? [String: Any],
+                       let val = JSONValue.optionalInt(sDict, "sensitivity") {
+                        return val
+                    }
+                    return JSONValue.optionalInt(item, "sensitivity")
+                }()
+
                 results.append(HueSSEUpdate(
                     eventType: eventType,
                     resourceType: rtype,
                     resourceID: rid,
+                    ownerID: ownerID,
                     on: on,
                     brightness: bri,
                     colorHex: colorHex,
                     mirek: mirek,
                     effect: effect,
                     sceneActive: sceneActive,
-                    name: cleanName
+                    name: cleanName,
+                    enabled: enabled,
+                    motion: motion,
+                    motionValid: motionValid,
+                    contactOpen: contactOpen,
+                    buttonEvent: buttonEvent,
+                    temperature: temperature,
+                    lux: lux,
+                    battery: battery,
+                    batteryState: batteryState,
+                    sensitivity: sensitivity
                 ))
             }
         }

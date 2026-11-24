@@ -78,11 +78,11 @@ struct SynthView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+                .fill(store.cardBackgroundColor)
         )
         .overlay(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .strokeBorder(store.synthRunning ? store.skinAccentColor.opacity(0.55) : Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(store.synthRunning ? store.skinAccentColor.opacity(0.55) : store.cardBorderColor, lineWidth: 1)
         )
     }
 
@@ -162,7 +162,11 @@ struct SynthView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+                .fill(store.cardBackgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                .strokeBorder(store.cardBorderColor, lineWidth: 1)
         )
     }
 
@@ -257,7 +261,11 @@ struct SynthView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+                .fill(store.cardBackgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                .strokeBorder(store.cardBorderColor, lineWidth: 1)
         )
     }
 
@@ -332,7 +340,11 @@ struct SynthView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
-                .fill(Color.primary.opacity(0.05))
+                .fill(store.cardBackgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+                .strokeBorder(store.cardBorderColor, lineWidth: 1)
         )
     }
 

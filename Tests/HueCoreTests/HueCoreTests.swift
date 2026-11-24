@@ -973,4 +973,294 @@ final class FloorplanTests: XCTestCase {
         XCTAssertNil(demo.currentSnapshot().room(newRoomID))
         XCTAssertNotNil(demo.currentSnapshot().light(DemoBridgeClient.deskLampID))
     }
+
+    func testBridgeProMotionAwareAndSensorsModelSSEAndRules() throws {
+        let lightID = "11111111-1111-1111-1111-111111111111"
+        let lightDevID = "22222222-2222-2222-2222-222222222222"
+        let bridgeDevID = "22222222-2222-2222-2222-222222222220"
+        let roomID = "33333333-3333-3333-3333-333333333333"
+        let groupID = "44444444-4444-4444-4444-444444444444"
+        let candID = "55555555-5555-5555-5555-555555555551"
+        let convID = "55555555-5555-5555-5555-555555555552"
+        let areaID = "55555555-5555-5555-5555-555555555553"
+        let motionDevID = "66666666-6666-6666-6666-666666666661"
+        let motionID = "66666666-6666-6666-6666-666666666662"
+        let tempID = "66666666-6666-6666-6666-666666666663"
+        let luxID = "66666666-6666-6666-6666-666666666664"
+        let powerID = "66666666-6666-6666-6666-666666666665"
+        let contactDevID = "77777777-7777-7777-7777-777777777771"
+        let contactID = "77777777-7777-7777-7777-777777777772"
+        let btnDevID = "88888888-8888-8888-8888-888888888881"
+        let btn1ID = "88888888-8888-8888-8888-888888888882"
+        let btn2ID = "88888888-8888-8888-8888-888888888883"
+
+        let resources: [[String: Any]] = [
+            ["id": "99999999-9999-9999-9999-999999999991", "type": "bridge", "owner": ["rid": bridgeDevID, "rtype": "device"]],
+            ["id": bridgeDevID, "type": "device", "product_data": ["model_id": "BSB003"]],
+            ["id": lightID, "type": "light", "owner": ["rid": lightDevID, "rtype": "device"], "metadata": ["name": "Pendant"], "on": ["on": true], "dimming": ["brightness": 80.0]],
+            ["id": lightDevID, "type": "device", "services": [["rid": lightID, "rtype": "light"]]],
+            ["id": groupID, "type": "grouped_light", "on": ["on": true]],
+            ["id": roomID, "type": "room", "metadata": ["name": "Living Room", "archetype": "living_room"], "children": [["rid": lightDevID, "rtype": "device"], ["rid": motionDevID, "rtype": "device"]], "services": [["rid": groupID, "rtype": "grouped_light"]]],
+            ["id": candID, "type": "motion_area_candidate", "owner": ["rid": lightDevID, "rtype": "device"]],
+            ["id": convID, "type": "convenience_area_motion", "owner": ["rid": areaID, "rtype": "motion_area_configuration"], "enabled": true, "motion": ["motion": true, "motion_valid": true]],
+            ["id": areaID, "type": "motion_area_configuration", "name": "Living MotionAware", "enabled": true, "group": ["rid": roomID, "rtype": "room"], "convenience_area_motion": ["rid": convID, "rtype": "convenience_area_motion"], "sensitivity": ["sensitivity": 3, "sensitivity_max": 4], "participants": [["rid": candID, "rtype": "motion_area_candidate"]]],
+            ["id": motionDevID, "type": "device", "metadata": ["name": "Hall Motion"]],
+            ["id": motionID, "type": "motion", "owner": ["rid": motionDevID, "rtype": "device"], "enabled": true, "motion": ["motion": false], "sensitivity": ["sensitivity": 2, "sensitivity_max": 4]],
+            ["id": tempID, "type": "temperature", "owner": ["rid": motionDevID, "rtype": "device"], "temperature": ["temperature": 21.44]],
+            ["id": luxID, "type": "light_level", "owner": ["rid": motionDevID, "rtype": "device"], "light": ["light_level": 10001]],
+            ["id": powerID, "type": "device_power", "owner": ["rid": motionDevID, "rtype": "device"], "power_state": ["battery_level": 88, "battery_state": "normal"]],
+            ["id": contactDevID, "type": "device", "metadata": ["name": "Front Door"]],
+            ["id": contactID, "type": "contact", "owner": ["rid": contactDevID, "rtype": "device"], "enabled": true, "contact_report": ["state": "no_contact"]],
+            ["id": btnDevID, "type": "device", "metadata": ["name": "Dimmer Switch"]],
+            ["id": btn1ID, "type": "button", "owner": ["rid": btnDevID, "rtype": "device"], "metadata": ["control_id": 1], "button": ["button_report": ["event": "short_release"]]],
+            ["id": btn2ID, "type": "button", "owner": ["rid": btnDevID, "rtype": "device"], "metadata": ["control_id": 2]],
+        ]
+
+        let built = HueModelBuilder.build(from: resources)
+        XCTAssertTrue(built.isPro)
+        XCTAssertEqual(built.bridgeModelID, "BSB003")
+        XCTAssertEqual(built.motionAreas.count, 1)
+        XCTAssertEqual(built.motionAreas[0].lightIDs, [lightID])
+        XCTAssertTrue(built.rooms[0].lights[0].motionAware)
+        XCTAssertTrue(built.rooms[0].lights[0].motionActive)
+        XCTAssertEqual(built.sensors.count, 3)
+
+        let motionSensor = try XCTUnwrap(built.sensors.first { $0.kind == "motion" })
+        XCTAssertEqual(motionSensor.temperature, 21.4)
+        XCTAssertEqual(motionSensor.lux, 10.0)
+        XCTAssertEqual(motionSensor.battery, 88)
+        let contactSensor = try XCTUnwrap(built.sensors.first { $0.kind == "contact" })
+        XCTAssertTrue(contactSensor.open)
+        let switchSensor = try XCTUnwrap(built.sensors.first { $0.kind == "button" })
+        XCTAssertEqual(switchSensor.buttonIDs.count, 2)
+
+        // Floorplan without "sensors" decodes cleanly with empty dict
+        let legacyFP = try JSONDecoder().decode(FloorplanDocument.self, from: Data(#"{"version":1}"#.utf8))
+        XCTAssertTrue(legacyFP.sensors.isEmpty)
+
+        // SSE parser extracts motion, contact, button, temperature, light_level, device_power
+        let ssePayload = #"[{"type":"update","data":[{"id":"\#(motionID)","type":"motion","motion":{"motion":true}},{"id":"\#(contactID)","type":"contact","contact_report":{"state":"contact"}}]}]"#
+        let updates = SSEParser.parsePayload(ssePayload)
+        XCTAssertEqual(updates.count, 2)
+        XCTAssertEqual(updates[0].motion, true)
+        XCTAssertEqual(updates[1].contactOpen, false)
+
+        // RuleEngine evaluates sensor triggers & mirrorOff
+        var now = Date(timeIntervalSince1970: 1_700_000_000)
+        let rule = HueRule(
+            id: "sr1", name: "Hall Motion", kind: "follow",
+            triggerKind: "motion", triggerID: motionID, triggerState: "motion",
+            targets: [HueRuleTarget(kind: "light", id: lightID, action: "on")],
+            mirrorOff: true
+        )
+        let engine = RuleEngine(rules: [rule], now: { now })
+        let snap = HueSnapshot(phase: "ok", rooms: built.rooms, lightCount: 1, onCount: 1, motionAreas: built.motionAreas, sensors: built.sensors)
+        let firedOn = engine.evaluateSensorEvent(kind: "motion", id: motionID, state: "motion", snapshot: snap)
+        XCTAssertEqual(firedOn.first?.on, true)
+        now += 5
+        let firedOff = engine.evaluateSensorEvent(kind: "motion", id: motionID, state: "clear", snapshot: snap)
+        XCTAssertEqual(firedOff.first?.on, false)
+    }
+}
+
+final class AskAIAndMCPTests: XCTestCase {
+    func testAskAISettingsDefaultOffAndDecodeBackwardsCompatible() throws {
+        // Empty JSON decodes cleanly with askAIEnabled == false
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: Data("{}".utf8))
+        XCTAssertFalse(decoded.askAIEnabled)
+        XCTAssertEqual(decoded.askAIOllamaURL, AppSettings.defaultAskAIOllamaURL)
+        XCTAssertEqual(decoded.askAIModel, "")
+
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hue-askai-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = SettingsStore(directory: dir)
+        XCTAssertFalse(store.askAIEnabled())
+        XCTAssertEqual(store.askAIOllamaURL(), "http://127.0.0.1:11434")
+        XCTAssertEqual(store.askAIModel(), "")
+
+        try store.setAskAIEnabled(true)
+        try store.setAskAIOllamaURL("http://localhost:11434")
+        try store.setAskAIModel("llama3.2")
+        XCTAssertTrue(store.askAIEnabled())
+        XCTAssertEqual(store.askAIOllamaURL(), "http://localhost:11434")
+        XCTAssertEqual(store.askAIModel(), "llama3.2")
+        XCTAssertEqual(store.appSettings(), AppSettings(askAIEnabled: true, askAIOllamaURL: "http://localhost:11434", askAIModel: "llama3.2"))
+    }
+
+    func testLoopbackOllamaURLGuard() {
+        XCTAssertEqual(HueAskAIEngine.validatedLocalOllamaEndpoint("http://127.0.0.1:11434")?.absoluteString, "http://127.0.0.1:11434/api/chat")
+        XCTAssertEqual(HueAskAIEngine.validatedLocalOllamaEndpoint("http://localhost:11434/")?.absoluteString, "http://localhost:11434/api/chat")
+        XCTAssertEqual(HueAskAIEngine.validatedLocalOllamaEndpoint("http://127.0.0.1:11434/api/chat")?.absoluteString, "http://127.0.0.1:11434/api/chat")
+        XCTAssertNil(HueAskAIEngine.validatedLocalOllamaEndpoint("http://192.168.1.10:11434"))
+        XCTAssertNil(HueAskAIEngine.validatedLocalOllamaEndpoint("http://example.com:11434"))
+        XCTAssertNil(HueAskAIEngine.validatedLocalOllamaEndpoint("https://api.openai.com/v1"))
+        XCTAssertNil(HueAskAIEngine.validatedLocalOllamaEndpoint("http://user:pass@127.0.0.1:11434"))
+        XCTAssertNil(HueAskAIEngine.validatedLocalOllamaEndpoint("ftp://localhost:11434"))
+    }
+
+    @MainActor
+    func testAskAIParserEnglishAndGermanCommands() {
+        let demo = DemoBridgeClient()
+        let snap = demo.currentSnapshot()
+        let engine = HueAskAIEngine()
+
+        // All on / off (EN & DE)
+        XCTAssertEqual(engine.parse("All lights off", snapshot: snap).calls.first?.name, "hue_all_off")
+        XCTAssertEqual(engine.parse("Alle Lichter aus", snapshot: snap).calls.first?.name, "hue_all_off")
+        XCTAssertEqual(engine.parse("Alle Lampen an", snapshot: snap).calls.first?.name, "hue_all_on")
+
+        // Status queries (EN & DE)
+        XCTAssertEqual(engine.parse("Which lights are on?", snapshot: snap).calls.first?.name, "hue_status")
+        XCTAssertEqual(engine.parse("Welche Lichter sind an?", snapshot: snap).calls.first?.name, "hue_status")
+
+        // Room brightness + warmth (EN & DE)
+        let dimWarm = engine.parse("Dim Living Room to 40% warm", snapshot: snap)
+        XCTAssertEqual(dimWarm.calls.first?.name, "hue_set_room")
+        XCTAssertEqual(dimWarm.calls.first?.arguments["target"]?.stringValue, DemoBridgeClient.livingRoomID)
+        XCTAssertEqual(dimWarm.calls.first?.arguments["bri"]?.intValue, 40)
+        XCTAssertNotNil(dimWarm.calls.first?.arguments["mirek"]?.intValue)
+
+        let deWarm = engine.parse("Wohnzimmer auf 30% warmweiß", snapshot: snap)
+        XCTAssertEqual(deWarm.calls.first?.name, "hue_set_room")
+        XCTAssertEqual(deWarm.calls.first?.arguments["target"]?.stringValue, DemoBridgeClient.livingRoomID)
+        XCTAssertEqual(deWarm.calls.first?.arguments["bri"]?.intValue, 30)
+
+        // Light hex color, Kelvin & native effect
+        let hexCmd = engine.parse("Set Floor Lamp to #ff00aa", snapshot: snap)
+        XCTAssertEqual(hexCmd.calls.first?.name, "hue_set_light")
+        XCTAssertEqual(hexCmd.calls.first?.arguments["color"]?.stringValue, "#ff00aa")
+
+        let kelvinCmd = engine.parse("Desk Lamp 2700K", snapshot: snap)
+        XCTAssertEqual(kelvinCmd.calls.first?.name, "hue_set_light")
+        XCTAssertEqual(kelvinCmd.calls.first?.arguments["kelvin"]?.intValue, 2700)
+
+        let effectCmd = engine.parse("Floor Lamp candle", snapshot: snap)
+        XCTAssertEqual(effectCmd.calls.first?.name, "hue_set_light")
+        XCTAssertEqual(effectCmd.calls.first?.arguments["effect"]?.stringValue, "candle")
+
+        // Light theme application
+        let themeCmd = engine.parse("Apply Cyberpunk Neon to Office", snapshot: snap)
+        XCTAssertEqual(themeCmd.calls.first?.name, "hue_apply_theme")
+        XCTAssertEqual(themeCmd.calls.first?.arguments["theme"]?.stringValue, "builtin-cyberpunk-neon")
+        XCTAssertEqual(themeCmd.calls.first?.arguments["target"]?.stringValue, DemoBridgeClient.officeRoomID)
+
+        // Scene recall (DE room synonym)
+        let sceneCmd = engine.parse("Relax im Wohnzimmer", snapshot: snap)
+        XCTAssertEqual(sceneCmd.calls.first?.name, "hue_recall_scene")
+        XCTAssertEqual(sceneCmd.calls.first?.arguments["room"]?.stringValue, DemoBridgeClient.livingRoomID)
+
+        // Schedule creation (EN & DE, clock + sunset)
+        let schedEN = engine.parse("Turn on Hallway at 07:30 on weekdays", snapshot: snap)
+        XCTAssertEqual(schedEN.calls.first?.name, "hue_create_schedule")
+        XCTAssertEqual(schedEN.calls.first?.arguments["time"]?.stringValue, "07:30")
+        XCTAssertEqual(schedEN.calls.first?.arguments["days"]?.arrayValue?.count, 5)
+
+        let schedDE = engine.parse("Wohnzimmer bei Sonnenuntergang ausschalten", snapshot: snap)
+        XCTAssertEqual(schedDE.calls.first?.name, "hue_create_schedule")
+        XCTAssertEqual(schedDE.calls.first?.arguments["trigger_kind"]?.stringValue, "sunset")
+        XCTAssertEqual(schedDE.calls.first?.arguments["action"]?.stringValue, "off")
+
+        // Rule creation (physical sensor, lamp-to-lamp exclusive, MotionAware)
+        let sensorRule = engine.parse("When Hallway Motion detects motion, turn on Hallway", snapshot: snap)
+        XCTAssertEqual(sensorRule.calls.first?.name, "hue_create_rule")
+        XCTAssertEqual(sensorRule.calls.first?.arguments["trigger_kind"]?.stringValue, "motion")
+        XCTAssertEqual(sensorRule.calls.first?.arguments["trigger"]?.stringValue, DemoBridgeClient.hallwayMotionSensorID)
+        XCTAssertEqual(sensorRule.calls.first?.arguments["target"]?.stringValue, DemoBridgeClient.hallwayRoomID)
+
+        let lampRule = engine.parse("When Desk Lamp turns on, turn off Ceiling Pendant", snapshot: snap)
+        XCTAssertEqual(lampRule.calls.first?.name, "hue_create_rule")
+        XCTAssertEqual(lampRule.calls.first?.arguments["kind"]?.stringValue, "exclusive")
+        XCTAssertEqual(lampRule.calls.first?.arguments["action"]?.stringValue, "off")
+
+        let maRule = engine.parse("When Living Room MotionAware detects motion, turn on Living Room", snapshot: snap)
+        XCTAssertEqual(maRule.calls.first?.name, "hue_create_rule")
+        XCTAssertEqual(maRule.calls.first?.arguments["trigger_kind"]?.stringValue, "motion_area")
+        XCTAssertEqual(maRule.calls.first?.arguments["trigger"]?.stringValue, DemoBridgeClient.livingMotionAreaID)
+
+        // Sensor & MotionAware toggle
+        let disableSensor = engine.parse("Disable Hallway Motion", snapshot: snap)
+        XCTAssertEqual(disableSensor.calls.first?.name, "hue_set_sensor")
+        XCTAssertEqual(disableSensor.calls.first?.arguments["enabled"]?.boolValue, false)
+
+        let disableMA = engine.parse("Disable Living Room MotionAware", snapshot: snap)
+        XCTAssertEqual(disableMA.calls.first?.name, "hue_set_motion_area")
+        XCTAssertEqual(disableMA.calls.first?.arguments["enabled"]?.boolValue, false)
+    }
+
+    @MainActor
+    func testMCPServerLifecycleToolsAndSecretRedaction() async throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("hue-mcp-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let settings = SettingsStore(directory: tempDir)
+        let demo = DemoBridgeClient()
+        demo.start()
+        let backend = HeadlessHueToolBackend(client: demo, settings: settings, initialSnapshot: demo.currentSnapshot())
+        let server = HueMCPServer(backend: backend)
+
+        // 1. initialize
+        let initReply = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#))
+        XCTAssertTrue(initReply.contains(HueMCPServer.protocolVersion))
+        XCTAssertTrue(initReply.contains(HueMCPServer.serverName))
+
+        // 2. notifications/initialized -> nil
+        let notifReply = await server.handleRequestLine(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+        XCTAssertNil(notifReply)
+
+        // 3. ping
+        let pingReply = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#))
+        XCTAssertTrue(pingReply.contains(#""result":{}"#))
+
+        // 4. tools/list contains all required tools
+        let listReply = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#))
+        for requiredTool in [
+            "hue_status", "hue_list_rooms", "hue_list_lights", "hue_list_sensors",
+            "hue_list_themes", "hue_list_rules", "hue_list_schedules", "hue_get_floorplan",
+            "hue_set_light", "hue_set_room", "hue_recall_scene", "hue_apply_theme",
+            "hue_all_on", "hue_all_off", "hue_set_sensor", "hue_set_motion_area",
+            "hue_create_rule", "hue_toggle_rule", "hue_delete_rule",
+        ] {
+            XCTAssertTrue(listReply.contains("\"\(requiredTool)\""), "Missing MCP tool \(requiredTool)")
+        }
+
+        // 5. tools/call: set light by name, recall scene, apply theme, toggle sensor & motion area, create/toggle/delete rule
+        let setLightReply = try XCTUnwrap(await server.handleRequestLine(
+            #"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"hue_set_light","arguments":{"target":"Desk Lamp","on":true,"bri":55}}}"#
+        ))
+        XCTAssertTrue(setLightReply.contains(#""isError":false"#))
+        XCTAssertEqual(Int((demo.currentSnapshot().light(DemoBridgeClient.deskLampID)?.bri ?? 0).rounded()), 55)
+
+        let allOffReply = try XCTUnwrap(await server.handleRequestLine(
+            #"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"hue_all_off","arguments":{}}}"#
+        ))
+        XCTAssertTrue(allOffReply.contains(#""isError":false"#))
+        XCTAssertEqual(demo.currentSnapshot().onCount, 0)
+
+        let createRuleReply = try XCTUnwrap(await server.handleRequestLine(
+            #"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"hue_create_rule","arguments":{"name":"MCP Motion Rule","trigger_kind":"motion","trigger":"Hallway Motion","target_kind":"room","target":"Hallway","action":"on"}}}"#
+        ))
+        XCTAssertTrue(createRuleReply.contains("MCP Motion Rule"))
+        let createdRule = try XCTUnwrap(backend.currentRules.first { $0.name == "MCP Motion Rule" })
+
+        let toggleReply = try XCTUnwrap(await server.handleRequestLine(
+            #"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"hue_toggle_rule","arguments":{"rule":"MCP Motion Rule","enabled":false}}}"#
+        ))
+        XCTAssertTrue(toggleReply.contains(#""isError":false"#))
+        XCTAssertEqual(backend.currentRules.first { $0.id == createdRule.id }?.enabled, false)
+
+        let deleteReply = try XCTUnwrap(await server.handleRequestLine(
+            #"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"hue_delete_rule","arguments":{"rule":"MCP Motion Rule"}}}"#
+        ))
+        XCTAssertTrue(deleteReply.contains(#""isError":false"#))
+        XCTAssertNil(backend.currentRules.first { $0.id == createdRule.id })
+
+        // 6. resources/list & resources/read (hue://state) — verify no credential keys ever leak
+        let resList = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":9,"method":"resources/list"}"#))
+        XCTAssertTrue(resList.contains("hue://state"))
+
+        let resRead = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":10,"method":"resources/read","params":{"uri":"hue://state"}}"#))
+        XCTAssertTrue(resRead.contains("Living Room"))
+        for secretKey in ["app_key", "appKey", "client_key", "clientKey", "fingerprint"] {
+            XCTAssertFalse(resRead.contains(secretKey), "MCP hue://state must never expose \(secretKey)")
+        }
+    }
 }

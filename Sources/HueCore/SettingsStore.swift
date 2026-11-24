@@ -160,6 +160,43 @@ public struct AppearanceSettings: Equatable, Sendable {
     }
 }
 
+/// Codable snapshot of optional app-level preferences (including opt-in Ask AI settings).
+/// Backwards-compatible: missing keys decode safely with `askAIEnabled = false`.
+public struct AppSettings: Codable, Equatable, Sendable {
+    public static let defaultAskAIOllamaURL = "http://127.0.0.1:11434"
+
+    public var askAIEnabled: Bool = false
+    public var askAIOllamaURL: String = AppSettings.defaultAskAIOllamaURL
+    public var askAIModel: String = ""
+
+    enum CodingKeys: String, CodingKey {
+        case askAIEnabled
+        case askAIOllamaURL
+        case askAIModel
+    }
+
+    public init(
+        askAIEnabled: Bool = false,
+        askAIOllamaURL: String = AppSettings.defaultAskAIOllamaURL,
+        askAIModel: String = ""
+    ) {
+        self.askAIEnabled = askAIEnabled
+        self.askAIOllamaURL = askAIOllamaURL
+        self.askAIModel = askAIModel
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        askAIEnabled = try c.decodeIfPresent(Bool.self, forKey: .askAIEnabled) ?? false
+        let rawURL = try c.decodeIfPresent(String.self, forKey: .askAIOllamaURL) ?? AppSettings.defaultAskAIOllamaURL
+        askAIOllamaURL = rawURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? AppSettings.defaultAskAIOllamaURL
+            : rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        askAIModel = (try c.decodeIfPresent(String.self, forKey: .askAIModel) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 /// App Sandbox-safe preferences, local schedules & rules store.
 /// On macOS, defaults to `Application Support/MaprismaLights` (automatically inside the app
 /// sandbox container). Stores `settings.json`, `rules.json`, and `schedules.json` with atomic 0600 writes.
@@ -397,6 +434,48 @@ public struct SettingsStore {
         var settings = read()
         settings["rulesPaused"] = value
         try write(settings)
+    }
+
+    // MARK: - Optional Ask AI (OFF by default)
+
+    public func askAIEnabled() -> Bool {
+        (read()["askAIEnabled"] as? Bool) ?? false
+    }
+
+    public func setAskAIEnabled(_ value: Bool) throws {
+        var settings = read()
+        settings["askAIEnabled"] = value
+        try write(settings)
+    }
+
+    public func askAIOllamaURL() -> String {
+        let raw = (read()["askAIOllamaURL"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? AppSettings.defaultAskAIOllamaURL : raw
+    }
+
+    public func setAskAIOllamaURL(_ value: String) throws {
+        var settings = read()
+        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings["askAIOllamaURL"] = cleaned.isEmpty ? AppSettings.defaultAskAIOllamaURL : cleaned
+        try write(settings)
+    }
+
+    public func askAIModel() -> String {
+        (read()["askAIModel"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func setAskAIModel(_ value: String) throws {
+        var settings = read()
+        settings["askAIModel"] = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        try write(settings)
+    }
+
+    public func appSettings() -> AppSettings {
+        AppSettings(
+            askAIEnabled: askAIEnabled(),
+            askAIOllamaURL: askAIOllamaURL(),
+            askAIModel: askAIModel()
+        )
     }
 
     // MARK: - Detached Window Frame (size & screen position)
