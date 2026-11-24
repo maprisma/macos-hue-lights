@@ -42,9 +42,14 @@ public final class RuleEngine {
     public var paused: Bool
     public private(set) var log: [HueRuleLogEntry] = []
 
+    private struct OutgoingEcho {
+        let expectedOn: Bool?
+        let sentAt: Date
+    }
+
     private let now: () -> Date
     private let calendar: Calendar
-    private var outgoingTimestamps: [String: Date] = [:]
+    private var outgoingRecords: [String: OutgoingEcho] = [:]
     private var ruleCooldowns: [String: Date] = [:]
 
     public init(
@@ -61,16 +66,19 @@ public final class RuleEngine {
 
     // MARK: - Echo Suppression
 
-    public func recordOutgoing(kind: String, id: String) {
-        outgoingTimestamps[Self.key(kind, id)] = now()
+    public func recordOutgoing(kind: String, id: String, expectedOn: Bool? = nil) {
+        outgoingRecords[Self.key(kind, id)] = OutgoingEcho(expectedOn: expectedOn, sentAt: now())
     }
 
-    public func isEcho(kind: String, id: String) -> Bool {
+    public func isEcho(kind: String, id: String, isOn: Bool? = nil) -> Bool {
         let current = now()
-        guard let sentAt = outgoingTimestamps[Self.key(kind, id)] else { return false }
-        let elapsed = current.timeIntervalSince(sentAt)
+        guard let record = outgoingRecords[Self.key(kind, id)] else { return false }
+        let elapsed = current.timeIntervalSince(record.sentAt)
         if elapsed >= Self.echoWindow || elapsed < 0 {
-            outgoingTimestamps.removeValue(forKey: Self.key(kind, id))
+            outgoingRecords.removeValue(forKey: Self.key(kind, id))
+            return false
+        }
+        if let expected = record.expectedOn, let actual = isOn, expected != actual {
             return false
         }
         return true
@@ -89,7 +97,7 @@ public final class RuleEngine {
         bypassEcho: Bool = false
     ) -> [RuleAction] {
         guard !paused, depth < Self.maxCascadeDepth else { return [] }
-        if !bypassEcho && isEcho(kind: kind, id: id) {
+        if !bypassEcho && isEcho(kind: kind, id: id, isOn: isOn) {
             return []
         }
 
@@ -109,13 +117,32 @@ public final class RuleEngine {
             if !ruleActions.isEmpty {
                 ruleCooldowns[rule.id] = current
                 for action in ruleActions {
-                    recordOutgoing(kind: action.kind, id: action.id)
+                    recordOutgoingAction(action, snapshot: snapshot)
                 }
                 appendLog(rule: rule, summary: Self.logMessage(rule: rule, triggerState: isOn ? "on" : "off", count: ruleActions.count), at: current)
                 emitted.append(contentsOf: ruleActions)
             }
         }
         return emitted
+    }
+
+    private func recordOutgoingAction(_ action: RuleAction, snapshot: HueSnapshot) {
+        if action.kind == "scene", let sceneID = action.sceneID {
+            recordOutgoing(kind: "scene", id: sceneID, expectedOn: true)
+            if let room = snapshot.rooms.first(where: { $0.scenes.contains(where: { $0.id == sceneID }) }) {
+                recordOutgoing(kind: "room", id: room.id, expectedOn: true)
+                for light in room.lights {
+                    recordOutgoing(kind: "light", id: light.id, expectedOn: true)
+                }
+            }
+            return
+        }
+        recordOutgoing(kind: action.kind, id: action.id, expectedOn: action.on)
+        if action.kind == "room", let room = snapshot.room(action.id) {
+            for light in room.lights {
+                recordOutgoing(kind: "light", id: light.id, expectedOn: action.on)
+            }
+        }
     }
 
     /// Evaluates desktop rules for `"wake"` or `"sleep"`.
@@ -160,7 +187,7 @@ public final class RuleEngine {
             if !actions.isEmpty {
                 ruleCooldowns[rule.id] = current
                 for action in actions {
-                    recordOutgoing(kind: action.kind, id: action.id)
+                    recordOutgoingAction(action, snapshot: snapshot)
                 }
                 appendLog(rule: rule, summary: Self.logMessage(rule: rule, triggerState: normalized, count: actions.count), at: current)
                 emitted.append(contentsOf: actions)

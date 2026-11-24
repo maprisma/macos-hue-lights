@@ -41,9 +41,11 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     private var panelOpen: Bool = false
     private var connGeneration: Int = 0
     private var pairGeneration: Int = 0
+    private var discoveryGeneration: Int = 0
 
     private var sseTask: Task<Void, Never>?
     private var refreshLoopTask: Task<Void, Never>?
+    private var manualRefreshTask: Task<Void, Never>?
     private var pairTask: Task<Void, Never>?
     private var discoverTask: Task<Void, Never>?
     private var browser: NWBrowser?
@@ -79,10 +81,16 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     }
 
     public func stop() {
+        connGeneration += 1
+        pairGeneration += 1
+        discoveryGeneration += 1
+        discovering = false
         sseTask?.cancel()
         sseTask = nil
         refreshLoopTask?.cancel()
         refreshLoopTask = nil
+        manualRefreshTask?.cancel()
+        manualRefreshTask = nil
         pairTask?.cancel()
         pairTask = nil
         discoverTask?.cancel()
@@ -108,7 +116,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     public func refresh() {
         guard let creds = credentials else { return }
         let gen = connGeneration
-        Task { [weak self] in
+        manualRefreshTask?.cancel()
+        manualRefreshTask = Task { [weak self] in
             await self?.performRefresh(credentials: creds, generation: gen)
         }
     }
@@ -117,6 +126,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
 
     public func discover() {
         guard !discovering else { return }
+        discoveryGeneration += 1
+        let discGen = discoveryGeneration
         discovering = true
         emit()
 
@@ -132,13 +143,13 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         newBrowser.browseResultsChangedHandler = { [weak self] results, _ in
             guard let self = self else { return }
             for result in results {
-                self.resolveBonjourResult(result, collector: collector)
+                self.resolveBonjourResult(result, collector: collector, discoveryGen: discGen)
             }
         }
         newBrowser.stateUpdateHandler = { [weak self] state in
             if case .failed = state {
                 Task { @MainActor [weak self] in
-                    self?.finishDiscovery(collector: collector)
+                    self?.finishDiscovery(collector: collector, discoveryGen: discGen)
                 }
             }
         }
@@ -148,12 +159,12 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                self?.finishDiscovery(collector: collector)
+                self?.finishDiscovery(collector: collector, discoveryGen: discGen)
             }
         }
     }
 
-    private nonisolated func resolveBonjourResult(_ result: NWBrowser.Result, collector: DiscoveryCollector) {
+    private nonisolated func resolveBonjourResult(_ result: NWBrowser.Result, collector: DiscoveryCollector, discoveryGen: Int) {
         var name = "Hue Bridge"
         if case .service(let svcName, _, _, _) = result.endpoint {
             let cleaned = HueColorMath.clean(svcName)
@@ -177,8 +188,9 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                     let cand = BridgeCandidate(ip: ip, bridgeID: bridgeID, name: name)
                     let updated = collector.add(cand)
                     Task { @MainActor [weak self] in
-                        self?.candidates = updated
-                        self?.emit()
+                        guard let self = self, self.discovering, self.discoveryGeneration == discoveryGen else { return }
+                        self.candidates = updated
+                        self.emit()
                     }
                 }
                 conn.cancel()
@@ -213,7 +225,9 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         }
     }
 
-    private func finishDiscovery(collector: DiscoveryCollector) {
+    private func finishDiscovery(collector: DiscoveryCollector, discoveryGen: Int) {
+        guard discoveryGeneration == discoveryGen else { return }
+        discoveryGeneration += 1
         browser?.cancel()
         browser = nil
         discoverTask?.cancel()
@@ -434,9 +448,10 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         guard HueColorMath.validUUID(id) else { return }
         let body = Self.makeLightBody(on: on, bri: bri, mirek: mirek, xy: xy, effect: effect)
         guard !body.isEmpty else { return }
-        ruleEngine.recordOutgoing(kind: "light", id: id)
+        let effectiveOn = on ?? (bri != nil || mirek != nil || xy != nil ? true : nil)
+        ruleEngine.recordOutgoing(kind: "light", id: id, expectedOn: effectiveOn)
         applyOptimistic(kind: "light", id: id, on: on, bri: bri, mirek: mirek, xy: xy, effect: effect)
-        if let on = on ?? (bri != nil || mirek != nil || xy != nil ? true : nil) {
+        if let on = effectiveOn {
             let actions = ruleEngine.evaluateChange(
                 kind: "light", id: id, isOn: on, bri: bri.map(Double.init),
                 snapshot: currentSnapshot(), depth: 0, bypassEcho: true
@@ -458,12 +473,16 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         guard HueColorMath.validUUID(id) else { return }
         let body = Self.makeLightBody(on: on, bri: bri, mirek: mirek, xy: xy, effect: effect)
         guard !body.isEmpty else { return }
+        let effectiveOn = on ?? (bri != nil || mirek != nil || xy != nil ? true : nil)
         if let room = rooms.first(where: { $0.groupedLight == id || $0.id == id }) {
-            ruleEngine.recordOutgoing(kind: "room", id: room.id)
+            ruleEngine.recordOutgoing(kind: "room", id: room.id, expectedOn: effectiveOn)
+            for light in room.lights {
+                ruleEngine.recordOutgoing(kind: "light", id: light.id, expectedOn: effectiveOn)
+            }
         }
         applyOptimistic(kind: "grouped_light", id: id, on: on, bri: bri, mirek: mirek, xy: xy, effect: effect)
         if let room = rooms.first(where: { $0.groupedLight == id || $0.id == id }),
-           let on = on ?? (bri != nil || mirek != nil || xy != nil ? true : nil) {
+           let on = effectiveOn {
             let actions = ruleEngine.evaluateChange(
                 kind: "room", id: room.id, isOn: on, bri: bri.map(Double.init),
                 snapshot: currentSnapshot(), depth: 0, bypassEcho: true
@@ -476,13 +495,20 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
 
     public func recallScene(id: String) {
         guard HueColorMath.validUUID(id) else { return }
+        if let room = rooms.first(where: { $0.scenes.contains(where: { $0.id == id }) }) {
+            ruleEngine.recordOutgoing(kind: "room", id: room.id, expectedOn: true)
+            for light in room.lights {
+                ruleEngine.recordOutgoing(kind: "light", id: light.id, expectedOn: true)
+            }
+        }
         sendResourcePUT(kind: "scene", id: id, body: ["recall": ["action": "active"]])
     }
 
     public func allOn(excludeRooms: Set<String>) {
         if excludeRooms.isEmpty && HueColorMath.validUUID(bridgeHomeGroupedLight) {
             for room in rooms {
-                for light in room.lights { ruleEngine.recordOutgoing(kind: "light", id: light.id) }
+                ruleEngine.recordOutgoing(kind: "room", id: room.id, expectedOn: true)
+                for light in room.lights { ruleEngine.recordOutgoing(kind: "light", id: light.id, expectedOn: true) }
             }
             applyAllOptimistic(on: true, excludeRooms: [])
             emit()
@@ -492,6 +518,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         var targets: [(String, String)] = []
         for room in rooms {
             if excludeRooms.contains(room.id) || room.kind == "zone" { continue }
+            ruleEngine.recordOutgoing(kind: "room", id: room.id, expectedOn: true)
+            for light in room.lights { ruleEngine.recordOutgoing(kind: "light", id: light.id, expectedOn: true) }
             if !room.groupedLight.isEmpty && HueColorMath.validUUID(room.groupedLight) {
                 targets.append(("grouped_light", room.groupedLight))
             } else {
@@ -504,7 +532,6 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         applyAllOptimistic(on: true, excludeRooms: excludeRooms)
         emit()
         for (kind, id) in targets {
-            ruleEngine.recordOutgoing(kind: kind == "grouped_light" ? "room" : "light", id: id)
             sendResourcePUT(kind: kind, id: id, body: ["on": ["on": true]])
         }
     }
@@ -512,7 +539,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     public func allOff() {
         if HueColorMath.validUUID(bridgeHomeGroupedLight) {
             for room in rooms {
-                for light in room.lights { ruleEngine.recordOutgoing(kind: "light", id: light.id) }
+                ruleEngine.recordOutgoing(kind: "room", id: room.id, expectedOn: false)
+                for light in room.lights { ruleEngine.recordOutgoing(kind: "light", id: light.id, expectedOn: false) }
             }
             applyAllOptimistic(on: false, excludeRooms: [])
             emit()
@@ -522,9 +550,12 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         var targets: [(String, String)] = []
         for room in rooms {
             if room.kind == "room" && room.on && HueColorMath.validUUID(room.groupedLight) {
+                ruleEngine.recordOutgoing(kind: "room", id: room.id, expectedOn: false)
+                for light in room.lights { ruleEngine.recordOutgoing(kind: "light", id: light.id, expectedOn: false) }
                 targets.append(("grouped_light", room.groupedLight))
             } else if room.kind == "other" {
                 for light in room.lights where light.on && HueColorMath.validUUID(light.id) {
+                    ruleEngine.recordOutgoing(kind: "light", id: light.id, expectedOn: false)
                     targets.append(("light", light.id))
                 }
             }
@@ -809,6 +840,10 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                 }
 
             case "grouped_light":
+                if update.eventType == "add" || update.eventType == "delete" {
+                    needsFullRefresh = true
+                    continue
+                }
                 applyGroupDelta(update)
                 if let isOn = update.on,
                    let room = rooms.first(where: { $0.groupedLight == update.resourceID }) {

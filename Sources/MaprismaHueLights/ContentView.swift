@@ -40,7 +40,14 @@ struct ContentView: View {
             LightThemesSheet(light: light)
                 .environmentObject(store)
         }
-        .background(WindowObserver { open in store.setPanel(open: open) })
+        .background(
+            WindowObserver(
+                mode: mode,
+                savedFrame: mode == .detached ? store.savedWindowFrame() : nil,
+                onChange: { open in store.setPanel(open: open) },
+                onFrameChange: mode == .detached ? { frame in store.saveWindowFrame(frame) } : nil
+            )
+        )
         .onAppear { store.setPanel(open: true) }
         .onDisappear { store.setPanel(open: false) }
     }
@@ -341,23 +348,42 @@ struct FooterView: View {
     }
 }
 
-/// Tells the store when the window becomes key (shown) or resigns key (closed).
+/// Tells the store when the window becomes key (shown) or resigns key (closed), and
+/// restores/saves size and screen position for the detached resizable window.
 struct WindowObserver: NSViewRepresentable {
+    let mode: ContentView.DisplayMode
+    let savedFrame: SavedWindowFrame?
     let onChange: (Bool) -> Void
+    let onFrameChange: ((SavedWindowFrame) -> Void)?
 
     func makeNSView(context: Context) -> ObserverView {
         let view = ObserverView()
+        view.mode = mode
+        view.savedFrame = savedFrame
         view.onChange = onChange
+        view.onFrameChange = onFrameChange
         return view
     }
 
     func updateNSView(_ nsView: ObserverView, context: Context) {
+        nsView.mode = mode
         nsView.onChange = onChange
+        nsView.onFrameChange = onFrameChange
     }
 
     final class ObserverView: NSView {
+        var mode: ContentView.DisplayMode = .popover
+        var savedFrame: SavedWindowFrame?
         var onChange: ((Bool) -> Void)?
+        var onFrameChange: ((SavedWindowFrame) -> Void)?
         private weak var observed: NSWindow?
+        private var restoredWindow = false
+        private var saveWorkItem: DispatchWorkItem?
+
+        deinit {
+            saveWorkItem?.cancel()
+            NotificationCenter.default.removeObserver(self)
+        }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -365,13 +391,46 @@ struct WindowObserver: NSViewRepresentable {
             if let old = observed {
                 center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: old)
                 center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: old)
+                center.removeObserver(self, name: NSWindow.didResizeNotification, object: old)
+                center.removeObserver(self, name: NSWindow.didMoveNotification, object: old)
+                center.removeObserver(self, name: NSWindow.willCloseNotification, object: old)
             }
+            center.removeObserver(self, name: NSApplication.willTerminateNotification, object: nil)
             observed = window
             guard let window = window else { return }
             center.addObserver(self, selector: #selector(becameKey(_:)),
                                name: NSWindow.didBecomeKeyNotification, object: window)
             center.addObserver(self, selector: #selector(resignedKey(_:)),
                                name: NSWindow.didResignKeyNotification, object: window)
+            if mode == .detached {
+                window.isRestorable = false
+                window.setFrameAutosaveName("")
+                center.addObserver(self, selector: #selector(frameChanged(_:)),
+                                   name: NSWindow.didResizeNotification, object: window)
+                center.addObserver(self, selector: #selector(frameChanged(_:)),
+                                   name: NSWindow.didMoveNotification, object: window)
+                center.addObserver(self, selector: #selector(willClose(_:)),
+                                   name: NSWindow.willCloseNotification, object: window)
+                center.addObserver(self, selector: #selector(willClose(_:)),
+                                   name: NSApplication.willTerminateNotification, object: nil)
+                if !restoredWindow, let saved = savedFrame {
+                    restoredWindow = true
+                    let screens = NSScreen.screens.map { s in
+                        let vf = s.visibleFrame
+                        return SavedWindowFrame(
+                            x: Double(vf.origin.x),
+                            y: Double(vf.origin.y),
+                            width: Double(vf.size.width),
+                            height: Double(vf.size.height)
+                        )
+                    }
+                    let clamped = saved.clamped(to: screens)
+                    let rect = NSRect(x: clamped.x, y: clamped.y, width: clamped.width, height: clamped.height)
+                    DispatchQueue.main.async { [weak window] in
+                        window?.setFrame(rect, display: true)
+                    }
+                }
+            }
             if window.isKeyWindow {
                 Task { @MainActor [weak self] in self?.onChange?(true) }
             }
@@ -379,6 +438,36 @@ struct WindowObserver: NSViewRepresentable {
 
         @objc private func becameKey(_ note: Notification) { onChange?(true) }
         @objc private func resignedKey(_ note: Notification) { onChange?(false) }
+
+        @objc private func frameChanged(_ note: Notification) {
+            guard mode == .detached, let window = observed else { return }
+            let f = window.frame
+            let snapshot = SavedWindowFrame(
+                x: Double(f.origin.x),
+                y: Double(f.origin.y),
+                width: Double(f.size.width),
+                height: Double(f.size.height)
+            )
+            saveWorkItem?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                self?.onFrameChange?(snapshot)
+            }
+            saveWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: item)
+        }
+
+        @objc private func willClose(_ note: Notification) {
+            guard mode == .detached, let window = observed else { return }
+            saveWorkItem?.cancel()
+            saveWorkItem = nil
+            let f = window.frame
+            onFrameChange?(SavedWindowFrame(
+                x: Double(f.origin.x),
+                y: Double(f.origin.y),
+                width: Double(f.size.width),
+                height: Double(f.size.height)
+            ))
+        }
     }
 }
 

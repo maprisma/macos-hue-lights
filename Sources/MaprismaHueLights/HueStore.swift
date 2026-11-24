@@ -88,6 +88,7 @@ final class HueStore: ObservableObject {
     private var synthPhase: Double = 0.0
     private var lastSynthOutputTime: Date = .distantPast
     private var activeEntertainmentAreaID: String?
+    private var cachedWindowFrame: SavedWindowFrame?
     private(set) var panelOpen = false
 
     init() {
@@ -111,6 +112,7 @@ final class HueStore: ObservableObject {
         rules = savedRules
         rulesPaused = savedPaused
         localSchedules = settings.loadLocalSchedules()
+        cachedWindowFrame = settings.windowFrame()
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
 
         let nativeClient = NativeHueBridgeClient(rules: savedRules, rulesPaused: savedPaused)
@@ -127,6 +129,9 @@ final class HueStore: ObservableObject {
         }
         audioCapture.onPermissionError = { [weak self] kind, message in
             self?.synthPermissionIssue = (kind, message)
+            self?.stopSynth()
+        }
+        audioCapture.onStreamStopped = { [weak self] _ in
             self?.stopSynth()
         }
         hotKeyManager.onAction = { [weak self] action in
@@ -495,9 +500,25 @@ final class HueStore: ObservableObject {
         }
     }
 
+    private var synthStartGeneration: Int = 0
+    private var requestedEntertainmentAreaID: String?
+    private var entertainmentDeactivationTask: Task<Void, Never>?
+
     @discardableResult
     private func startSynthAsync() async -> Bool {
         guard snapshot.isPaired, !synthTargetLights.isEmpty else { return false }
+        synthStartGeneration += 1
+        let gen = synthStartGeneration
+        let areaID = synthEntertainmentAreaID
+        requestedEntertainmentAreaID = areaID.isEmpty ? nil : areaID
+
+        audioCapture.stop()
+        stopEntertainmentIfNeeded()
+        if let pendingDeactivation = entertainmentDeactivationTask {
+            await pendingDeactivation.value
+            guard synthStartGeneration == gen else { return false }
+        }
+
         synthPermissionIssue = nil
         synthMapper.reset()
         synthPhase = 0.0
@@ -505,26 +526,40 @@ final class HueStore: ObservableObject {
 
         // Try Entertainment v2 DTLS-PSK if an area is chosen and clientKey is available
         synthUsingEntertainment = false
-        if !synthEntertainmentAreaID.isEmpty,
+        if !areaID.isEmpty,
            let creds = client.entertainmentCredentials,
            !creds.clientKey.isEmpty {
-            let activated = await client.setEntertainmentActive(areaID: synthEntertainmentAreaID, active: true)
+            let activated = await client.setEntertainmentActive(areaID: areaID, active: true)
+            guard synthStartGeneration == gen else {
+                if activated && activeEntertainmentAreaID != areaID && requestedEntertainmentAreaID != areaID {
+                    _ = await client.setEntertainmentActive(areaID: areaID, active: false)
+                }
+                return false
+            }
             if activated && entertainmentStreamer.start(
                 ip: creds.ip,
                 appKey: creds.appKey,
                 clientKeyHex: creds.clientKey,
-                areaID: synthEntertainmentAreaID
+                areaID: areaID
             ) {
-                activeEntertainmentAreaID = synthEntertainmentAreaID
+                activeEntertainmentAreaID = areaID
                 synthUsingEntertainment = true
+            } else if activated {
+                _ = await client.setEntertainmentActive(areaID: areaID, active: false)
             }
         }
 
         let started = await audioCapture.start(source: synthSource)
+        // If superseded by stopSynth() or a newer startSynthAsync(), that caller already stopped
+        // our audioCapture and entertainment session; never clobber the newer session.
+        guard synthStartGeneration == gen else {
+            return false
+        }
         if started {
             synthRunning = true
             return true
         } else {
+            requestedEntertainmentAreaID = nil
             stopEntertainmentIfNeeded()
             synthRunning = false
             return false
@@ -532,6 +567,8 @@ final class HueStore: ObservableObject {
     }
 
     func stopSynth() {
+        synthStartGeneration += 1
+        requestedEntertainmentAreaID = nil
         audioCapture.stop()
         stopEntertainmentIfNeeded()
         synthRunning = false
@@ -543,7 +580,9 @@ final class HueStore: ObservableObject {
         entertainmentStreamer.stop()
         if let areaID = activeEntertainmentAreaID {
             activeEntertainmentAreaID = nil
-            Task { [weak self] in
+            let previous = entertainmentDeactivationTask
+            entertainmentDeactivationTask = Task { [weak self] in
+                await previous?.value
                 _ = await self?.client.setEntertainmentActive(areaID: areaID, active: false)
             }
         }
@@ -933,4 +972,16 @@ final class HueStore: ObservableObject {
     }
 
     func quit() { NSApp.terminate(nil) }
+
+    // MARK: - Detached Window Frame
+
+    func savedWindowFrame() -> SavedWindowFrame? {
+        cachedWindowFrame
+    }
+
+    func saveWindowFrame(_ frame: SavedWindowFrame) {
+        guard cachedWindowFrame != frame else { return }
+        cachedWindowFrame = frame
+        try? settings.setWindowFrame(frame)
+    }
 }

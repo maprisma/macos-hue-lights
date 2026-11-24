@@ -19,7 +19,7 @@ Everything in `Sources/` was rewritten to **100% pure Swift 5.9+ (macOS 13+, App
   - `AppSkin.swift` — 6 fun skins (*System Native, Neon Synthwave, Cozy Cabin, Retro Terminal, Disco Lava, Minimal Zen*) + 8 selectable Menu Bar Icons + optional lit-count badge.
   - `SettingsStore.swift` — sandbox-safe `Application Support/MaprismaLights`.
 - **SwiftUI App (`Sources/MaprismaHueLights/`):**
-  - `MaprismaHueLightsApp.swift` — `MenuBarExtra(.window)` + detachable resizable 2-column `Window("Maprisma Lights", id: "main-window")`, `NSWorkspace` wake/sleep & screen-lock observers.
+  - `MaprismaHueLightsApp.swift` — `MenuBarExtra(.window)` + detachable resizable 2-column `Window("Maprisma Lights", id: "main-window")` with saved window size & screen position (clamped to connected displays), `NSWorkspace` wake/sleep & screen-lock observers.
   - `ContentView.swift`, `RoomsView.swift`, `SchedulesView.swift`, `RulesView.swift`, `SynthView.swift`, `LightThemesView.swift`, `PairingView.swift`, `SettingsView.swift`.
   - `AudioCaptureManager.swift` — `ScreenCaptureKit` system audio (MAS sandbox–compliant; never `AudioHardwareCreateProcessTap`) + `AVAudioEngine` microphone + Demo Beat.
   - `GlobalHotKeyManager.swift` — Carbon `RegisterEventHotKey` (sandbox-safe, zero Accessibility permission).

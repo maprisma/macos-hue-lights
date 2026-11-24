@@ -79,6 +79,56 @@ public enum FontSizeScale: String, CaseIterable, Identifiable, Equatable, Sendab
     }
 }
 
+public struct SavedWindowFrame: Equatable, Codable, Sendable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+
+    public var isValid: Bool {
+        x.isFinite && y.isFinite && width.isFinite && height.isFinite && width >= 300 && height >= 300
+    }
+
+    /// Clamps this frame so it fits cleanly inside the best matching visible screen rectangle.
+    public func clamped(
+        to visibleScreens: [SavedWindowFrame],
+        minWidth: Double = 520,
+        minHeight: Double = 500
+    ) -> SavedWindowFrame {
+        guard !visibleScreens.isEmpty else {
+            return SavedWindowFrame(
+                x: x,
+                y: y,
+                width: max(minWidth, width),
+                height: max(minHeight, height)
+            )
+        }
+        let target = visibleScreens.max { a, b in
+            intersectionArea(with: a) < intersectionArea(with: b)
+        } ?? visibleScreens[0]
+        let effectiveMinW = min(minWidth, max(0, target.width))
+        let effectiveMinH = min(minHeight, max(0, target.height))
+        let w = min(max(effectiveMinW, width), max(0, target.width))
+        let h = min(max(effectiveMinH, height), max(0, target.height))
+        let clampedX = min(max(x, target.x), target.x + max(0, target.width - w))
+        let clampedY = min(max(y, target.y), target.y + max(0, target.height - h))
+        return SavedWindowFrame(x: clampedX, y: clampedY, width: w, height: h)
+    }
+
+    private func intersectionArea(with other: SavedWindowFrame) -> Double {
+        let overlapW = max(0, min(x + width, other.x + other.width) - max(x, other.x))
+        let overlapH = max(0, min(y + height, other.y + other.height) - max(y, other.y))
+        return overlapW * overlapH
+    }
+}
+
 public struct AppearanceSettings: Equatable, Sendable {
     public var cornerStyle: CornerStyle
     public var backgroundStyle: BackgroundStyle
@@ -341,6 +391,34 @@ public struct SettingsStore {
     public func setRulesPaused(_ value: Bool) throws {
         var settings = read()
         settings["rulesPaused"] = value
+        try write(settings)
+    }
+
+    // MARK: - Detached Window Frame (size & screen position)
+
+    public func windowFrame() -> SavedWindowFrame? {
+        guard let dict = read()["windowFrame"] as? [String: Any] else { return nil }
+        func num(_ key: String) -> Double? {
+            if let d = dict[key] as? Double { return d }
+            if let n = dict[key] as? NSNumber { return n.doubleValue }
+            return nil
+        }
+        guard let x = num("x"), let y = num("y"), let w = num("width"), let h = num("height") else {
+            return nil
+        }
+        let frame = SavedWindowFrame(x: x, y: y, width: w, height: h)
+        return frame.isValid ? frame : nil
+    }
+
+    public func setWindowFrame(_ frame: SavedWindowFrame) throws {
+        guard frame.isValid else { return }
+        var settings = read()
+        settings["windowFrame"] = [
+            "x": frame.x.rounded(),
+            "y": frame.y.rounded(),
+            "width": frame.width.rounded(),
+            "height": frame.height.rounded(),
+        ]
         try write(settings)
     }
 

@@ -270,8 +270,10 @@ final class RuleEngineTests: XCTestCase {
         XCTAssertEqual(onActions[0].on, true)
         XCTAssertEqual(onActions[0].bri, 72)
 
-        // Echo suppression for B within 1.5s
-        XCTAssertTrue(engine.isEcho(kind: "light", id: b))
+        // Echo suppression for B within 1.5s matches expected state (true),
+        // while an opposite external toggle (false) is NOT suppressed.
+        XCTAssertTrue(engine.isEcho(kind: "light", id: b, isOn: true))
+        XCTAssertFalse(engine.isEcho(kind: "light", id: b, isOn: false))
         // Cooldown prevents re-firing within 2.0s
         now += 1.0
         XCTAssertTrue(engine.evaluateChange(kind: "light", id: a, isOn: false, snapshot: snap).isEmpty)
@@ -281,6 +283,25 @@ final class RuleEngineTests: XCTestCase {
         let offActions = engine.evaluateChange(kind: "light", id: a, isOn: false, snapshot: snap)
         XCTAssertEqual(offActions.count, 1)
         XCTAssertEqual(offActions[0].on, false)
+        XCTAssertTrue(engine.isEcho(kind: "light", id: b, isOn: false))
+        XCTAssertFalse(engine.isEcho(kind: "light", id: b, isOn: true))
+    }
+
+    func testRoomRuleSuppressesMemberLightEchoes() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let snap = makeSnapshot(aOn: true, bOn: true)
+        let officeID = snap.rooms[0].id
+        let sleepRoomRule = HueRule(
+            id: "r-room", name: "Sleep Office", kind: "desktop", triggerKind: "desktop", triggerID: "desktop",
+            triggerState: "sleep", targets: [HueRuleTarget(kind: "room", id: officeID, action: "off")]
+        )
+        let engine = RuleEngine(rules: [sleepRoomRule], now: { now })
+        let actions = engine.evaluateDesktopEvent("sleep", snapshot: snap)
+        XCTAssertEqual(actions.count, 1)
+        XCTAssertTrue(engine.isEcho(kind: "room", id: officeID, isOn: false))
+        XCTAssertTrue(engine.isEcho(kind: "light", id: a, isOn: false))
+        XCTAssertTrue(engine.isEcho(kind: "light", id: b, isOn: false))
+        XCTAssertFalse(engine.isEcho(kind: "light", id: a, isOn: true))
     }
 
     func testExclusiveAndDesktopAndPauseAndLogCap() {
@@ -548,6 +569,34 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(SettingsStore.defaultDirectory(environment: ["HOME": "/Users/a"]).path, "/Users/a/.config/hue-lights")
         XCTAssertEqual(SettingsStore.defaultDirectory(environment: ["HOME": "/Users/a", "XDG_CONFIG_HOME": "/x"]).path, "/x/hue-lights")
         #endif
+    }
+
+    func testWindowFramePersistenceAndClamping() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hue-frame-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = SettingsStore(directory: dir)
+        XCTAssertNil(store.windowFrame())
+
+        let saved = SavedWindowFrame(x: 240, y: 180, width: 860, height: 700)
+        try store.setWindowFrame(saved)
+        XCTAssertEqual(store.windowFrame(), saved)
+
+        // Clamp off-screen monitor coordinate back into a 1440x900 screen
+        let offScreen = SavedWindowFrame(x: 3200, y: 900, width: 900, height: 700)
+        let screen = SavedWindowFrame(x: 0, y: 25, width: 1440, height: 875)
+        let clamped = offScreen.clamped(to: [screen])
+        XCTAssertEqual(clamped.x, 540)
+        XCTAssertEqual(clamped.y, 200)
+        XCTAssertEqual(clamped.width, 900)
+        XCTAssertEqual(clamped.height, 700)
+
+        // Clamp safely on displays smaller than default 520x500 minimum
+        let tinyScreen = SavedWindowFrame(x: 10, y: 20, width: 400, height: 380)
+        let tinyClamped = SavedWindowFrame(x: -50, y: 500, width: 800, height: 700).clamped(to: [tinyScreen])
+        XCTAssertEqual(tinyClamped.x, 10)
+        XCTAssertEqual(tinyClamped.y, 20)
+        XCTAssertEqual(tinyClamped.width, 400)
+        XCTAssertEqual(tinyClamped.height, 380)
     }
 }
 
