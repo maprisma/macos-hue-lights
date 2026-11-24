@@ -444,6 +444,17 @@ class SwiftAppTests(unittest.TestCase):
         self.assertIn("RegisterEventHotKey", read("Sources", "MaprismaHueLights", "GlobalHotKeyManager.swift"))
         self.assertIn("AppShortcutsProvider", read("Sources", "MaprismaHueLights", "HueAppIntents.swift"))
         self.assertIn("ScreenCaptureKit", read("Sources", "MaprismaHueLights", "AudioCaptureManager.swift"))
+        floorplan = read("Sources", "HueCore", "Floorplan.swift")
+        for needle in ("FloorplanDocument", "FloorplanTemplate", "FloorplanBackground", "FloorplanSpatial", "entertainmentPositions"):
+            self.assertIn(needle, floorplan)
+        map_view = read("Sources", "MaprismaHueLights", "MapView.swift")
+        for needle in ("MapView", "QuickSceneScheduleSheet", "QuickWireRuleSheet", "syncAllFloorplanToBridge"):
+            self.assertIn(needle, map_view)
+        # SwiftUI files must never reference unqualified BackgroundStyle (ambiguous with SwiftUI.BackgroundStyle)
+        import re
+        for name, text in self.swift_sources():
+            if "import SwiftUI" in text:
+                self.assertIsNone(re.search(r'(?<!HueCore\.)\bBackgroundStyle\b', text), name)
 
     def test_build_and_install_scripts(self):
         for name in ("build-mac.sh", "install-mac.sh"):

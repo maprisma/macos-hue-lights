@@ -18,9 +18,12 @@ public final class DemoBridgeClient: HueBridgeControlling {
     public static let monitorBacklightID = "30000000-0000-0000-0000-000000000005"
 
     public var onSnapshot: ((HueSnapshot) -> Void)?
+    public var bridgeID: String { "demo" }
+    public private(set) var entertainmentPositions: [String: [String: (Double, Double, Double)]] = [:]
 
     private struct MutableLight {
         var id: String
+        var deviceID: String
         var name: String
         var on: Bool
         var bri: Double
@@ -37,7 +40,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
 
         func toModel() -> HueLight {
             HueLight(
-                id: id, name: name, on: on, bri: bri, dimmable: dimmable, color: color,
+                id: id, deviceID: deviceID, name: name, on: on, bri: bri, dimmable: dimmable, color: color,
                 reachable: reachable, supportsColor: supportsColor, supportsCT: supportsCT,
                 mirek: mirek, mirekMin: mirekMin, mirekMax: mirekMax, effect: effect,
                 availableEffects: availableEffects
@@ -78,6 +81,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                 lights: [
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000001",
+                        deviceID: "80000000-0000-0000-0000-000000000001",
                         name: "Ceiling Pendant",
                         on: true, bri: 80, dimmable: true,
                         color: HueColorMath.mirekToHex(320), reachable: true,
@@ -86,6 +90,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                     ),
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000002",
+                        deviceID: "80000000-0000-0000-0000-000000000002",
                         name: "Floor Lamp",
                         on: true, bri: 55, dimmable: true,
                         color: "#ffaa44", reachable: true,
@@ -94,6 +99,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                     ),
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000003",
+                        deviceID: "80000000-0000-0000-0000-000000000003",
                         name: "TV Play Bars",
                         on: false, bri: 40, dimmable: true,
                         color: "#6677ff", reachable: true,
@@ -116,6 +122,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                 lights: [
                     MutableLight(
                         id: Self.deskLampID,
+                        deviceID: "80000000-0000-0000-0000-000000000004",
                         name: "Desk Lamp",
                         on: true, bri: 90, dimmable: true,
                         color: HueColorMath.mirekToHex(250), reachable: true,
@@ -124,6 +131,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                     ),
                     MutableLight(
                         id: Self.monitorBacklightID,
+                        deviceID: "80000000-0000-0000-0000-000000000005",
                         name: "Monitor Backlight",
                         on: true, bri: 65, dimmable: true,
                         color: "#66ccff", reachable: true,
@@ -145,6 +153,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                 lights: [
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000006",
+                        deviceID: "80000000-0000-0000-0000-000000000006",
                         name: "Bedside Left",
                         on: false, bri: 30, dimmable: true,
                         color: HueColorMath.mirekToHex(420), reachable: true,
@@ -153,6 +162,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                     ),
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000007",
+                        deviceID: "80000000-0000-0000-0000-000000000007",
                         name: "Bedside Right",
                         on: false, bri: 30, dimmable: true,
                         color: HueColorMath.mirekToHex(420), reachable: true,
@@ -174,6 +184,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                 lights: [
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000008",
+                        deviceID: "80000000-0000-0000-0000-000000000008",
                         name: "Entryway Spot",
                         on: false, bri: 70, dimmable: true,
                         color: HueColorMath.mirekToHex(300), reachable: true,
@@ -182,6 +193,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
                     ),
                     MutableLight(
                         id: "30000000-0000-0000-0000-000000000009",
+                        deviceID: "80000000-0000-0000-0000-000000000009",
                         name: "Staircase Strip",
                         on: false, bri: 45, dimmable: true,
                         color: "#ffd27a", reachable: true,
@@ -399,7 +411,7 @@ public final class DemoBridgeClient: HueBridgeControlling {
             days: draft.days,
             action: draft.action,
             bri: draft.action == "on" ? draft.bri : nil,
-            sceneID: "",
+            sceneID: draft.action == "scene" ? draft.sceneID : "",
             fadeMin: draft.fadeMin,
             source: "bridge"
         )
@@ -437,6 +449,165 @@ public final class DemoBridgeClient: HueBridgeControlling {
 
     public func setEntertainmentActive(areaID: String, active: Bool) async -> Bool {
         false
+    }
+
+    // MARK: - Two-Way Spatial & Organization Mutations (In-Memory Demo)
+
+    public func renameLight(id: String, name: String) {
+        let clean = HueColorMath.clean(name, limit: 32)
+        guard !clean.isEmpty else { return }
+        var changed = false
+        for rIdx in rooms.indices {
+            for lIdx in rooms[rIdx].lights.indices where rooms[rIdx].lights[lIdx].id == id {
+                rooms[rIdx].lights[lIdx].name = clean
+                changed = true
+            }
+        }
+        if changed { emit() }
+    }
+
+    @discardableResult
+    public func createRoom(kind: String, name: String, archetype: String, deviceIDs: [String]) async -> String? {
+        let safeKind = (kind == "zone") ? "zone" : "room"
+        let cleanName = HueColorMath.clean(name, limit: 32)
+        let finalName = cleanName.isEmpty ? (safeKind == "zone" ? "Zone" : "Room") : cleanName
+        let cleanArch = HueColorMath.clean(archetype, limit: 30)
+        let newID = UUID().uuidString.lowercased()
+        let newGroupID = UUID().uuidString.lowercased()
+        let memberLights = collectLights(matching: Set(deviceIDs), moveOutOfRooms: safeKind == "room")
+        rooms.append(MutableRoom(
+            id: newID,
+            kind: safeKind,
+            name: finalName,
+            groupedLight: newGroupID,
+            archetype: cleanArch.isEmpty ? "other" : cleanArch,
+            lights: memberLights,
+            scenes: []
+        ))
+        emit()
+        return newID
+    }
+
+    @discardableResult
+    public func updateRoom(
+        id: String,
+        kind: String,
+        name: String?,
+        archetype: String?,
+        deviceIDs: [String]?
+    ) async -> Bool {
+        guard let idx = rooms.firstIndex(where: { $0.id == id }) else { return false }
+        if let name = name {
+            let clean = HueColorMath.clean(name, limit: 32)
+            if !clean.isEmpty { rooms[idx].name = clean }
+        }
+        if let archetype = archetype {
+            let cleanArch = HueColorMath.clean(archetype, limit: 30)
+            if !cleanArch.isEmpty { rooms[idx].archetype = cleanArch }
+        }
+        if let deviceIDs = deviceIDs {
+            let idSet = Set(deviceIDs)
+            let isRoom = rooms[idx].kind == "room"
+            let chosen = collectLights(matching: idSet, moveOutOfRooms: isRoom, preserveRoomID: id)
+            rooms[idx].lights = chosen
+        }
+        emit()
+        return true
+    }
+
+    @discardableResult
+    public func deleteRoom(id: String, kind: String) async -> Bool {
+        guard let idx = rooms.firstIndex(where: { $0.id == id }) else { return false }
+        let removed = rooms.remove(at: idx)
+        if removed.kind == "room" && !removed.lights.isEmpty {
+            if let otherIdx = rooms.firstIndex(where: { $0.kind == "other" }) {
+                rooms[otherIdx].lights.append(contentsOf: removed.lights)
+            } else {
+                rooms.append(MutableRoom(
+                    id: "",
+                    kind: "other",
+                    name: "Other lights",
+                    groupedLight: "",
+                    archetype: "",
+                    lights: removed.lights,
+                    scenes: []
+                ))
+            }
+        }
+        emit()
+        return true
+    }
+
+    @discardableResult
+    public func createSceneFromRoom(roomID: String, name: String) async -> String? {
+        guard let idx = rooms.firstIndex(where: { $0.id == roomID }) else { return nil }
+        let cleanName = HueColorMath.clean(name, limit: 32)
+        let finalName = cleanName.isEmpty ? "Scene" : cleanName
+        let lit = rooms[idx].lights.filter(\.on)
+        let basis = lit.isEmpty ? rooms[idx].lights : lit
+        let color = HueColorMath.blendColors(basis.map(\.color))
+        let avgBri = basis.isEmpty ? 60.0 : (basis.map(\.bri).reduce(0.0, +) / Double(basis.count))
+        let newID = UUID().uuidString.lowercased()
+        for sIdx in rooms[idx].scenes.indices {
+            rooms[idx].scenes[sIdx].active = false
+        }
+        rooms[idx].scenes.append(MutableScene(
+            id: newID,
+            name: finalName,
+            active: true,
+            color: color,
+            bri: HueColorMath.clamp(avgBri, 1.0, 100.0)
+        ))
+        rooms[idx].scenes.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        emit()
+        return newID
+    }
+
+    @discardableResult
+    public func updateEntertainmentLocations(
+        areaID: String,
+        positions: [String: (Double, Double, Double)]
+    ) async -> Bool {
+        guard HueColorMath.validUUID(areaID), !positions.isEmpty else { return false }
+        var cleaned: [String: (Double, Double, Double)] = [:]
+        for (lightID, pos) in positions {
+            cleaned[lightID] = (
+                HueColorMath.clamp(pos.0.isFinite ? pos.0 : 0.0, -1.0, 1.0),
+                HueColorMath.clamp(pos.1.isFinite ? pos.1 : 0.5, 0.0, 1.0),
+                HueColorMath.clamp(pos.2.isFinite ? pos.2 : 0.0, -1.0, 1.0)
+            )
+        }
+        entertainmentPositions[areaID] = cleaned
+        return true
+    }
+
+    private func collectLights(
+        matching idSet: Set<String>,
+        moveOutOfRooms: Bool,
+        preserveRoomID: String? = nil
+    ) -> [MutableLight] {
+        var found: [MutableLight] = []
+        var seenLightIDs = Set<String>()
+        for rIdx in rooms.indices {
+            let isNonZone = rooms[rIdx].kind != "zone"
+            var remaining: [MutableLight] = []
+            for light in rooms[rIdx].lights {
+                let matches = idSet.contains(light.deviceID) || idSet.contains(light.id)
+                if matches {
+                    if seenLightIDs.insert(light.id).inserted {
+                        found.append(light)
+                    }
+                    if moveOutOfRooms && isNonZone && rooms[rIdx].id != preserveRoomID {
+                        continue
+                    }
+                }
+                remaining.append(light)
+            }
+            if moveOutOfRooms && isNonZone && rooms[rIdx].id != preserveRoomID {
+                rooms[rIdx].lights = remaining
+            }
+        }
+        return found
     }
 
     // MARK: - Helpers

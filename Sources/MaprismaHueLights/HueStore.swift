@@ -13,7 +13,7 @@ final class HueStore: ObservableObject {
 
     enum Page { case main, settings }
     enum MainTab: String, CaseIterable, Identifiable {
-        case lights, schedules, rules, synth
+        case lights, map, schedules, rules, synth
         var id: String { rawValue }
     }
     enum RoomFilter: String, CaseIterable, Identifiable {
@@ -60,6 +60,18 @@ final class HueStore: ObservableObject {
     @Published var showNewRuleSheet: Bool = false
     @Published var rulePrefillTrigger: (kind: String, id: String)?
     @Published var themeEditorLight: HueLight?
+
+    // Visual Floorplan & Spatial Light Studio
+    @Published var floorplan: FloorplanDocument = FloorplanDocument()
+    @Published private(set) var floorplanBackgroundImage: NSImage? = nil
+    @Published private(set) var floorplanSyncing: Bool = false
+    @Published var floorplanStatusMessage: String? = nil
+    @Published var floorplanBackgroundError: String? = nil
+    @Published var dismissedFloorplanDiffKey: String = ""
+    @Published private(set) var lastFiredRuleID: String? = nil
+    @Published private(set) var lastFiredRuleAt: Date = .distantPast
+    private var floorplanLoadedForBridgeID: String = ""
+    private var lastRuleLogID: String = ""
 
     // Audio-Reactive Light Synthesizer
     @Published private(set) var synthRunning: Bool = false
@@ -184,6 +196,14 @@ final class HueStore: ObservableObject {
         if new.isDemo {
             rules = new.rules
             rulesPaused = new.rulesPaused
+        }
+        if let latest = new.ruleLog.first, latest.id != lastRuleLogID {
+            lastRuleLogID = latest.id
+            lastFiredRuleID = latest.ruleID
+            lastFiredRuleAt = Date()
+        }
+        if new.isPaired && new.phase == "ok" {
+            ensureFloorplanLoaded(for: new)
         }
     }
 
@@ -813,7 +833,7 @@ final class HueStore: ObservableObject {
                 days: draft.days,
                 action: draft.action,
                 bri: draft.action == "on" ? draft.bri : nil,
-                sceneID: "",
+                sceneID: draft.action == "scene" ? draft.sceneID : "",
                 fadeMin: draft.fadeMin,
                 source: "local"
             )
@@ -890,6 +910,13 @@ final class HueStore: ObservableObject {
     func addRule(_ rule: HueRule) {
         rules.append(rule)
         syncRules()
+    }
+
+    func updateRule(_ rule: HueRule) {
+        if let idx = rules.firstIndex(where: { $0.id == rule.id }) {
+            rules[idx] = rule
+            syncRules()
+        }
     }
 
     func toggleRule(_ rule: HueRule, enabled: Bool) {
@@ -983,5 +1010,469 @@ final class HueStore: ObservableObject {
         guard cachedWindowFrame != frame else { return }
         cachedWindowFrame = frame
         try? settings.setWindowFrame(frame)
+    }
+
+    // MARK: - Visual Floorplan & Spatial Studio
+
+    var currentBridgeID: String {
+        if snapshot.isDemo { return "demo" }
+        let id = client.bridgeID
+        return id.isEmpty ? (snapshot.bridge?.ip ?? "default") : id
+    }
+
+    var pendingFloorplanSyncPlan: FloorplanSyncPlan {
+        FloorplanSpatial.buildSyncPlan(floorplan: floorplan, snapshot: snapshot)
+    }
+
+    var pendingRoomDiffs: [RoomMembershipDiff] {
+        FloorplanSpatial.pendingRoomMembershipDiffs(floorplan: floorplan, snapshot: snapshot)
+    }
+
+    var floorplanDiffSignature: String {
+        let plan = pendingFloorplanSyncPlan
+        let d1 = plan.membershipDiffs.map { "\($0.lightID)->\($0.toBoxID)" }.joined(separator: ",")
+        let d2 = plan.boxesToCreate.map(\.id).joined(separator: ",")
+        let d3 = plan.boxesToUpdateMeta.map { "\($0.id):\($0.name):\($0.archetype)" }.joined(separator: ",")
+        return "\(d1)|\(d2)|\(d3)"
+    }
+
+    private func ensureFloorplanLoaded(for snap: HueSnapshot) {
+        let key = currentBridgeID
+        let needsLoad = (floorplanLoadedForBridgeID != key)
+            || (floorplan.boxes.isEmpty && floorplan.lamps.isEmpty && !snap.rooms.isEmpty)
+        guard needsLoad else { return }
+        floorplanLoadedForBridgeID = key
+        dismissedFloorplanDiffKey = ""
+        if let saved = settings.loadFloorplan(bridgeID: key) {
+            floorplan = saved
+            floorplanBackgroundImage = settings.loadFloorplanBackgroundImage(fileName: saved.background.fileName)
+        } else {
+            floorplan = FloorplanTemplate.build(template: .autoBridge, snapshot: snap, bridgeID: key)
+            floorplanBackgroundImage = nil
+            persistFloorplan()
+        }
+    }
+
+    func persistFloorplan() {
+        var doc = floorplan
+        if doc.bridgeID.isEmpty {
+            doc.bridgeID = currentBridgeID
+            floorplan.bridgeID = doc.bridgeID
+        }
+        try? settings.saveFloorplan(doc)
+    }
+
+    func applyFloorplanTemplate(_ template: FloorplanTemplate) {
+        let prevBg = floorplan.background
+        let prevAuto = floorplan.autoSync
+        var built = FloorplanTemplate.build(template: template, snapshot: snapshot, bridgeID: currentBridgeID)
+        built.background = prevBg
+        built.autoSync = prevAuto
+        floorplan = built
+        dismissedFloorplanDiffKey = ""
+        persistFloorplan()
+    }
+
+    func setFloorplanAutoSync(_ enabled: Bool) {
+        floorplan.autoSync = enabled
+        persistFloorplan()
+        if enabled && pendingFloorplanSyncPlan.hasRoomOrMetaChanges {
+            syncAllFloorplanToBridge()
+        }
+    }
+
+    func placeLamp(_ lightID: String, at x: Double, y: Double) {
+        let lightName = snapshot.light(lightID)?.name ?? ""
+        let sx = floorplan.snapped(x)
+        let sy = floorplan.snapped(y)
+        let existing = floorplan.lamps[lightID]
+        floorplan.lamps[lightID] = FloorplanLampPlacement(
+            x: sx,
+            y: sy,
+            z: existing?.z ?? 0.0,
+            icon: existing?.icon ?? LampIcon.inferred(for: lightName)
+        )
+        persistFloorplan()
+        triggerAutoSyncIfEnabled()
+    }
+
+    func moveLamp(_ lightID: String, to x: Double, y: Double, finalize: Bool) {
+        guard var placement = floorplan.lamps[lightID] else { return }
+        placement.x = finalize ? floorplan.snapped(x) : x
+        placement.y = finalize ? floorplan.snapped(y) : y
+        floorplan.lamps[lightID] = placement
+        if finalize {
+            persistFloorplan()
+            triggerAutoSyncIfEnabled()
+        }
+    }
+
+    func unplaceLamp(_ lightID: String) {
+        floorplan.lamps.removeValue(forKey: lightID)
+        persistFloorplan()
+    }
+
+    func updateLampPlacement(_ lightID: String, z: Double? = nil, icon: LampIcon? = nil) {
+        guard var placement = floorplan.lamps[lightID] else { return }
+        if let z = z { placement.z = HueColorMath.clamp(z, -1.0, 1.0) }
+        if let icon = icon { placement.icon = icon }
+        floorplan.lamps[lightID] = placement
+        persistFloorplan()
+    }
+
+    func renameLight(id: String, name: String) {
+        let clean = HueColorMath.clean(name, limit: 32)
+        guard !clean.isEmpty else { return }
+        client.renameLight(id: id, name: clean)
+    }
+
+    func addFloorplanBox(kind: String, name: String, archetype: String, at x: Double, y: Double) {
+        let box = FloorplanBox(
+            kind: kind,
+            hueID: nil,
+            name: name,
+            archetype: archetype,
+            x: floorplan.snapped(x),
+            y: floorplan.snapped(y),
+            width: kind == "zone" ? 340 : 320,
+            height: kind == "zone" ? 200 : 240
+        )
+        floorplan.boxes.append(box)
+        persistFloorplan()
+    }
+
+    func updateFloorplanBox(
+        _ updated: FloorplanBox,
+        moveEnclosedLampIDs: [String] = [],
+        delta: (dx: Double, dy: Double)? = nil,
+        finalize: Bool = true
+    ) {
+        guard let idx = floorplan.boxes.firstIndex(where: { $0.id == updated.id }) else { return }
+        floorplan.boxes[idx] = updated
+        if let delta = delta, !moveEnclosedLampIDs.isEmpty {
+            for lid in moveEnclosedLampIDs {
+                if var lamp = floorplan.lamps[lid] {
+                    lamp.x = finalize ? floorplan.snapped(lamp.x + delta.dx) : (lamp.x + delta.dx)
+                    lamp.y = finalize ? floorplan.snapped(lamp.y + delta.dy) : (lamp.y + delta.dy)
+                    floorplan.lamps[lid] = lamp
+                }
+            }
+        }
+        if finalize {
+            persistFloorplan()
+            triggerAutoSyncIfEnabled()
+        }
+    }
+
+    func renameOrUpdateBoxOnBridge(_ box: FloorplanBox) {
+        guard let idx = floorplan.boxes.firstIndex(where: { $0.id == box.id }) else { return }
+        floorplan.boxes[idx] = box
+        persistFloorplan()
+        guard let hueID = box.hueID, HueColorMath.validUUID(hueID) else { return }
+        Task { [weak self] in
+            guard let self = self else { return }
+            _ = await self.client.updateRoom(
+                id: hueID,
+                kind: box.kind,
+                name: box.name,
+                archetype: box.archetype,
+                deviceIDs: nil
+            )
+        }
+    }
+
+    func createBoxOnBridge(_ box: FloorplanBox) {
+        guard box.hueID == nil else { return }
+        let enclosedIDs = deviceOrLightIDs(in: box)
+        Task { [weak self] in
+            guard let self = self else { return }
+            if let created = await self.client.createRoom(
+                kind: box.kind,
+                name: box.name,
+                archetype: box.archetype,
+                deviceIDs: enclosedIDs
+            ), let idx = self.floorplan.boxes.firstIndex(where: { $0.id == box.id }) {
+                self.floorplan.boxes[idx].hueID = created
+                self.persistFloorplan()
+            }
+        }
+    }
+
+    func deleteFloorplanBox(id: String, alsoDeleteOnBridge: Bool) {
+        guard let idx = floorplan.boxes.firstIndex(where: { $0.id == id }) else { return }
+        let removed = floorplan.boxes.remove(at: idx)
+        persistFloorplan()
+        if alsoDeleteOnBridge, let hueID = removed.hueID, HueColorMath.validUUID(hueID) {
+            Task { [weak self] in
+                guard let self = self else { return }
+                _ = await self.client.deleteRoom(id: hueID, kind: removed.kind)
+            }
+        }
+    }
+
+    func addStamp(kind: String, at x: Double, y: Double) {
+        let stamp = FloorplanStamp(
+            kind: kind,
+            x: floorplan.snapped(x),
+            y: floorplan.snapped(y)
+        )
+        floorplan.stamps.append(stamp)
+        persistFloorplan()
+    }
+
+    func moveStamp(id: String, to x: Double, y: Double, finalize: Bool) {
+        guard let idx = floorplan.stamps.firstIndex(where: { $0.id == id }) else { return }
+        floorplan.stamps[idx].x = finalize ? floorplan.snapped(x) : x
+        floorplan.stamps[idx].y = finalize ? floorplan.snapped(y) : y
+        if finalize { persistFloorplan() }
+    }
+
+    func rotateStamp(id: String) {
+        guard let idx = floorplan.stamps.firstIndex(where: { $0.id == id }) else { return }
+        floorplan.stamps[idx].rotation = (floorplan.stamps[idx].rotation + 90) % 360
+        persistFloorplan()
+    }
+
+    func deleteStamp(id: String) {
+        floorplan.stamps.removeAll { $0.id == id }
+        persistFloorplan()
+    }
+
+    func createSceneFromRoom(roomID: String, name: String) {
+        let clean = HueColorMath.clean(name, limit: 32)
+        guard !clean.isEmpty else { return }
+        Task { [weak self] in
+            guard let self = self else { return }
+            let created = await self.client.createSceneFromRoom(roomID: roomID, name: clean)
+            if created != nil {
+                self.showTransientFloorplanStatus(self.trf("Saved scene \"{0}\"", [clean]))
+            }
+        }
+    }
+
+    func syncEntertainmentBox(_ box: FloorplanBox) {
+        guard let areaID = box.entertainmentAreaID ?? floorplan.entertainmentAreaID,
+              HueColorMath.validUUID(areaID) else { return }
+        let positions = FloorplanSpatial.entertainmentPositions(forBox: box, floorplan: floorplan, snapshot: snapshot)
+        guard !positions.isEmpty else { return }
+        Task { [weak self] in
+            guard let self = self else { return }
+            let ok = await self.client.updateEntertainmentLocations(areaID: areaID, positions: positions)
+            if ok {
+                self.showTransientFloorplanStatus(self.tr("Synced Entertainment 2D/3D positions"))
+            }
+        }
+    }
+
+    func schedulesForRoom(_ roomID: String) -> [HueSchedule] {
+        guard !roomID.isEmpty else { return [] }
+        return allSchedules.filter { $0.enabled && $0.targetID == roomID }
+    }
+
+    func sceneName(for sceneID: String) -> String? {
+        guard !sceneID.isEmpty else { return nil }
+        for room in snapshot.rooms {
+            if let s = room.scenes.first(where: { $0.id == sceneID }) {
+                return s.name
+            }
+        }
+        return nil
+    }
+
+    /// 1-click "Sync All to Bridge": creates missing rooms/zones, updates renamed/re-typed rooms,
+    /// moves devices between rooms (1-room-per-device rule), updates zone memberships, and syncs
+    /// linked Entertainment Area 2D/3D coordinates.
+    func syncAllFloorplanToBridge() {
+        guard !floorplanSyncing else { return }
+        floorplanSyncing = true
+        dismissedFloorplanDiffKey = ""
+
+        Task { [weak self] in
+            guard let self = self else { return }
+            defer { self.floorplanSyncing = false }
+
+            let plan = FloorplanSpatial.buildSyncPlan(floorplan: self.floorplan, snapshot: self.snapshot)
+
+            // 1) Create any unlinked Room/Zone boxes that have lamps or need creation
+            for box in plan.boxesToCreate {
+                let initialIDs = self.deviceOrLightIDs(in: box)
+                if let created = await self.client.createRoom(
+                    kind: box.kind,
+                    name: box.name,
+                    archetype: box.archetype,
+                    deviceIDs: initialIDs
+                ), let idx = self.floorplan.boxes.firstIndex(where: { $0.id == box.id }) {
+                    self.floorplan.boxes[idx].hueID = created
+                }
+            }
+            self.persistFloorplan()
+
+            // 2) Update renamed / re-archetyped rooms & zones
+            for box in plan.boxesToUpdateMeta {
+                guard let hueID = box.hueID else { continue }
+                _ = await self.client.updateRoom(
+                    id: hueID,
+                    kind: box.kind,
+                    name: box.name,
+                    archetype: box.archetype,
+                    deviceIDs: nil
+                )
+            }
+
+            // 3) Coordinate 1-room-per-device membership moves
+            let currentDiffs = FloorplanSpatial.pendingRoomMembershipDiffs(floorplan: self.floorplan, snapshot: self.snapshot)
+            if !currentDiffs.isEmpty {
+                // Build current device lists per bridge room
+                var roomDevices: [String: [String]] = [:]
+                for room in self.snapshot.rooms where room.kind == "room" && !room.hueID.isEmpty {
+                    var seen = Set<String>()
+                    var ids: [String] = []
+                    for light in room.lights {
+                        let key = light.deviceID.isEmpty ? light.id : light.deviceID
+                        if seen.insert(key).inserted { ids.append(key) }
+                    }
+                    roomDevices[room.hueID] = ids
+                }
+
+                let initialRoomDevices = roomDevices
+                var movedOutBySource: [String: Set<String>] = [:]
+                var affectedDestRooms = Set<String>()
+
+                for diff in currentDiffs {
+                    guard let destBox = self.floorplan.boxes.first(where: { $0.id == diff.toBoxID }),
+                          let destRoomID = destBox.hueID else { continue }
+                    let devKey = diff.deviceID.isEmpty ? diff.lightID : diff.deviceID
+                    if let srcRoomID = diff.fromRoomID, srcRoomID != destRoomID {
+                        roomDevices[srcRoomID]?.removeAll { $0 == devKey }
+                        movedOutBySource[srcRoomID, default: []].insert(devKey)
+                    }
+                    var destList = roomDevices[destRoomID] ?? []
+                    if !destList.contains(devKey) {
+                        destList.append(devKey)
+                    }
+                    roomDevices[destRoomID] = destList
+                    affectedDestRooms.insert(destRoomID)
+                }
+
+                // Phase A: detach moved devices from EVERY source room first (handles A<->B swaps cleanly)
+                for (srcID, movedOut) in movedOutBySource {
+                    let pruned = (initialRoomDevices[srcID] ?? []).filter { !movedOut.contains($0) }
+                    _ = await self.client.updateRoom(id: srcID, kind: "room", name: nil, archetype: nil, deviceIDs: pruned)
+                }
+                // Phase B: attach final membership to every destination room
+                for dstID in affectedDestRooms {
+                    _ = await self.client.updateRoom(id: dstID, kind: "room", name: nil, archetype: nil, deviceIDs: roomDevices[dstID] ?? [])
+                }
+            }
+
+            // 4) Sync overlapping Zone boxes that are linked to a Bridge zone (including clearing empty zones)
+            for box in self.floorplan.boxes where box.kind == "zone" {
+                guard let hueID = box.hueID else { continue }
+                let enclosed = self.deviceOrLightIDs(in: box)
+                let currentMembers: [String] = self.snapshot.rooms
+                    .first(where: { $0.kind == "zone" && $0.hueID == hueID })?
+                    .lights
+                    .map { $0.deviceID.isEmpty ? $0.id : $0.deviceID } ?? []
+                if Set(enclosed) != Set(currentMembers) {
+                    _ = await self.client.updateRoom(id: hueID, kind: "zone", name: nil, archetype: nil, deviceIDs: enclosed)
+                }
+            }
+
+            // 5) Sync linked Entertainment Area 2D/3D spatial positions
+            var syncedAreaIDs = Set<String>()
+            for box in self.floorplan.boxes {
+                guard let areaID = box.entertainmentAreaID,
+                      HueColorMath.validUUID(areaID),
+                      syncedAreaIDs.insert(areaID).inserted else { continue }
+                let positions = FloorplanSpatial.entertainmentPositions(forBox: box, floorplan: self.floorplan, snapshot: self.snapshot)
+                if !positions.isEmpty {
+                    _ = await self.client.updateEntertainmentLocations(areaID: areaID, positions: positions)
+                }
+            }
+            if let docAreaID = self.floorplan.entertainmentAreaID,
+               HueColorMath.validUUID(docAreaID),
+               syncedAreaIDs.insert(docAreaID).inserted {
+                let canvasBox = FloorplanBox(
+                    kind: "room",
+                    name: "Canvas",
+                    x: 0,
+                    y: 0,
+                    width: self.floorplan.canvas.width,
+                    height: self.floorplan.canvas.height,
+                    entertainmentAreaID: docAreaID
+                )
+                let positions = FloorplanSpatial.entertainmentPositions(forBox: canvasBox, floorplan: self.floorplan, snapshot: self.snapshot)
+                if !positions.isEmpty {
+                    _ = await self.client.updateEntertainmentLocations(areaID: docAreaID, positions: positions)
+                }
+            }
+
+            self.showTransientFloorplanStatus(self.tr("Synced floorplan to Hue Bridge"))
+        }
+    }
+
+    private func triggerAutoSyncIfEnabled() {
+        guard floorplan.autoSync, pendingFloorplanSyncPlan.hasRoomOrMetaChanges else { return }
+        syncAllFloorplanToBridge()
+    }
+
+    private func deviceOrLightIDs(in box: FloorplanBox) -> [String] {
+        var ids: [String] = []
+        var seen = Set<String>()
+        for (lightID, placement) in floorplan.lamps where box.contains(x: placement.x, y: placement.y) {
+            if let light = snapshot.light(lightID) {
+                let key = (box.kind == "zone") ? light.id : (light.deviceID.isEmpty ? light.id : light.deviceID)
+                if seen.insert(key).inserted {
+                    ids.append(key)
+                }
+            }
+        }
+        return ids
+    }
+
+    private func showTransientFloorplanStatus(_ message: String) {
+        floorplanStatusMessage = message
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await MainActor.run {
+                if self?.floorplanStatusMessage == message {
+                    self?.floorplanStatusMessage = nil
+                }
+            }
+        }
+    }
+
+    // MARK: - Custom Floorplan Background Image
+
+    func setFloorplanBackground(from url: URL) {
+        do {
+            let fileName = try settings.saveFloorplanBackground(from: url, bridgeID: currentBridgeID)
+            floorplan.background.fileName = fileName
+            floorplanBackgroundImage = settings.loadFloorplanBackgroundImage(fileName: fileName)
+            floorplanBackgroundError = nil
+            persistFloorplan()
+        } catch SettingsError.fileTooLarge {
+            floorplanBackgroundError = tr("Image is larger than 15 MB.")
+        } catch {
+            floorplanBackgroundError = tr("Unsupported image format. Choose PNG, JPEG, HEIC, or WebP.")
+        }
+    }
+
+    func setFloorplanBackgroundOpacity(_ opacity: Double) {
+        floorplan.background.opacity = HueColorMath.clamp(opacity, FloorplanBackground.minOpacity, FloorplanBackground.maxOpacity)
+        persistFloorplan()
+    }
+
+    func setFloorplanBackgroundFit(_ fit: BackgroundFit) {
+        floorplan.background.fit = fit
+        persistFloorplan()
+    }
+
+    func clearFloorplanBackground() {
+        settings.clearFloorplanBackground(fileName: floorplan.background.fileName)
+        floorplan.background.fileName = nil
+        floorplanBackgroundImage = nil
+        floorplanBackgroundError = nil
+        persistFloorplan()
     }
 }

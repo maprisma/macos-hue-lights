@@ -13,6 +13,7 @@ public struct HueSSEUpdate: Equatable, Sendable {
     public let mirek: Int?
     public let effect: String?
     public let sceneActive: Bool?
+    public let name: String?
 
     public init(
         eventType: String,
@@ -23,7 +24,8 @@ public struct HueSSEUpdate: Equatable, Sendable {
         colorHex: String? = nil,
         mirek: Int? = nil,
         effect: String? = nil,
-        sceneActive: Bool? = nil
+        sceneActive: Bool? = nil,
+        name: String? = nil
     ) {
         self.eventType = eventType
         self.resourceType = resourceType
@@ -34,6 +36,7 @@ public struct HueSSEUpdate: Equatable, Sendable {
         self.mirek = mirek
         self.effect = effect
         self.sceneActive = sceneActive
+        self.name = name
     }
 }
 
@@ -146,6 +149,8 @@ public struct SSEParser: Sendable {
                 }
 
                 let effect = (item["effects"] as? [String: Any])?["status"] as? String
+                let rawName = (item["metadata"] as? [String: Any])?["name"] as? String
+                let cleanName = rawName.map { HueColorMath.clean($0, limit: 60) }.flatMap { $0.isEmpty ? nil : $0 }
                 var sceneActive: Bool? = nil
                 if rtype == "scene", let status = (item["status"] as? [String: Any])?["active"] as? String {
                     sceneActive = (status != "inactive")
@@ -160,7 +165,8 @@ public struct SSEParser: Sendable {
                     colorHex: colorHex,
                     mirek: mirek,
                     effect: effect,
-                    sceneActive: sceneActive
+                    sceneActive: sceneActive,
+                    name: cleanName
                 ))
             }
         }

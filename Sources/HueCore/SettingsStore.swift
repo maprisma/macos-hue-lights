@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 #if canImport(Darwin)
 import Darwin
 #else
@@ -11,6 +14,8 @@ public enum SettingsError: Error {
     /// Settings directory is not a real folder owned by this user.
     case notPrivate
     case writeFailed
+    case invalidImage
+    case fileTooLarge
 }
 
 public enum ScheduleMode: String, CaseIterable, Identifiable, Equatable, Sendable {
@@ -446,6 +451,120 @@ public struct SettingsStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(schedules)
         try writeAtomic(data: data, to: localSchedulesFile, prefix: ".schedules.")
+    }
+
+    // MARK: - Spatial Floorplan & Custom Background Image persistence
+
+    public static let maxFloorplanBytes: Int = 1024 * 1024
+    public static let maxBackgroundImageBytes: Int = 15 * 1024 * 1024
+
+    public func floorplanFile(for bridgeID: String) -> URL {
+        let safe = Self.safeBridgeSlug(bridgeID)
+        if safe.isEmpty {
+            return directory.appendingPathComponent("floorplan.json")
+        }
+        return directory.appendingPathComponent("floorplan-\(safe).json")
+    }
+
+    public func loadFloorplan(bridgeID: String) -> FloorplanDocument? {
+        let target = floorplanFile(for: bridgeID)
+        if let data = try? Data(contentsOf: target),
+           data.count <= Self.maxFloorplanBytes,
+           let doc = try? JSONDecoder().decode(FloorplanDocument.self, from: data) {
+            return doc
+        }
+        // Fallback to legacy unkeyed floorplan.json if bridgeID matches
+        let legacy = directory.appendingPathComponent("floorplan.json")
+        if legacy != target,
+           let data = try? Data(contentsOf: legacy),
+           data.count <= Self.maxFloorplanBytes,
+           let doc = try? JSONDecoder().decode(FloorplanDocument.self, from: data),
+           doc.bridgeID.caseInsensitiveCompare(bridgeID) == .orderedSame {
+            return doc
+        }
+        return nil
+    }
+
+    public func saveFloorplan(_ document: FloorplanDocument) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(document)
+        let target = floorplanFile(for: document.bridgeID)
+        try writeAtomic(data: data, to: target, prefix: ".floorplan.")
+    }
+
+    /// Validates `.png/.jpg/.jpeg/.heic/.webp` and max 15 MB, copies bytes into the sandboxed
+    /// Application Support directory with `0600` permissions, and returns the safe basename.
+    public func saveFloorplanBackground(from sourceURL: URL, bridgeID: String = "") throws -> String {
+        let ext = sourceURL.pathExtension.lowercased()
+        guard FloorplanBackground.allowedExtensions.contains(ext) else {
+            throw SettingsError.invalidImage
+        }
+        let accessed = sourceURL.startAccessingSecurityScopedResource()
+        defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
+
+        if let values = try? sourceURL.resourceValues(forKeys: [.fileSizeKey]),
+           let size = values.fileSize, size > Self.maxBackgroundImageBytes {
+            throw SettingsError.fileTooLarge
+        }
+        let data = try Data(contentsOf: sourceURL, options: [.mappedIfSafe])
+        guard !data.isEmpty else { throw SettingsError.invalidImage }
+        guard data.count <= Self.maxBackgroundImageBytes else { throw SettingsError.fileTooLarge }
+
+        let slug = Self.safeBridgeSlug(bridgeID)
+        let prefix = slug.isEmpty ? "floorplan-bg" : "floorplan-bg-\(slug)"
+        let fileName = "\(prefix).\(ext)"
+        guard let safeName = FloorplanBackground.sanitizeFileName(fileName) else {
+            throw SettingsError.invalidImage
+        }
+
+        // Remove any previous background with a different extension for this bridge
+        let fm = FileManager.default
+        for oldExt in FloorplanBackground.allowedExtensions where oldExt != ext {
+            let oldURL = directory.appendingPathComponent("\(prefix).\(oldExt)")
+            try? fm.removeItem(at: oldURL)
+        }
+
+        let destination = directory.appendingPathComponent(safeName)
+        try writeAtomic(data: data, to: destination, prefix: ".floorplan-bg.")
+        return safeName
+    }
+
+    /// Strictly resolves a validated basename inside `directory`, preventing any path traversal.
+    public func floorplanBackgroundURL(fileName: String?) -> URL? {
+        guard let safeName = FloorplanBackground.sanitizeFileName(fileName) else { return nil }
+        let url = directory.appendingPathComponent(safeName)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
+            return nil
+        }
+        return url
+    }
+
+    public func clearFloorplanBackground(fileName: String?) {
+        guard let url = floorplanBackgroundURL(fileName: fileName) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    #if canImport(AppKit)
+    public func loadFloorplanBackgroundImage(fileName: String?) -> NSImage? {
+        guard let url = floorplanBackgroundURL(fileName: fileName),
+              let data = try? Data(contentsOf: url),
+              data.count <= Self.maxBackgroundImageBytes else { return nil }
+        return NSImage(data: data)
+    }
+    #endif
+
+    private static func safeBridgeSlug(_ raw: String) -> String {
+        let filtered = raw.unicodeScalars.filter { scalar in
+            let v = scalar.value
+            return (0x30...0x39).contains(v)
+                || (0x41...0x5A).contains(v)
+                || (0x61...0x7A).contains(v)
+                || v == 0x2D
+                || v == 0x5F
+        }
+        return String(String(String.UnicodeScalarView(filtered)).prefix(32))
     }
 
     // MARK: - Low-level atomic write

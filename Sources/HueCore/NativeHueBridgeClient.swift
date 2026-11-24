@@ -33,6 +33,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     private var scheduleScriptID: String = HueModelBuilder.defaultScheduleScriptID
     private var schedules: [HueSchedule] = []
     private var entertainmentAreas: [HueEntertainmentArea] = []
+    private var entertainmentServiceByLight: [String: String] = [:]
     private var candidates: [BridgeCandidate] = []
     private var discovering: Bool = false
     private var pairIP: String = ""
@@ -305,6 +306,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         bridgeHomeGroupedLight = ""
         schedules = []
         entertainmentAreas = []
+        entertainmentServiceByLight = [:]
         pairIP = ""
         pairRemaining = 0
         phase = "unpaired"
@@ -675,9 +677,353 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         }
     }
 
+    public var bridgeID: String {
+        credentials?.bridgeID ?? ""
+    }
+
     public var entertainmentCredentials: BridgeCredentials? {
         guard let creds = credentials, !creds.clientKey.isEmpty else { return nil }
         return creds
+    }
+
+    // MARK: - Two-Way Spatial & Organization CLIP v2 Mutations
+
+    public func renameLight(id: String, name: String) {
+        guard HueColorMath.validUUID(id) else { return }
+        let clean = HueColorMath.clean(name, limit: 32)
+        guard !clean.isEmpty else { return }
+
+        var matchedDeviceID = ""
+        rooms = rooms.map { room in
+            var changed = false
+            let newLights = room.lights.map { light -> HueLight in
+                guard light.id == id else { return light }
+                changed = true
+                if !light.deviceID.isEmpty { matchedDeviceID = light.deviceID }
+                return HueLight(
+                    id: light.id, deviceID: light.deviceID, name: clean, on: light.on, bri: light.bri,
+                    dimmable: light.dimmable, color: light.color, reachable: light.reachable,
+                    supportsColor: light.supportsColor, supportsCT: light.supportsCT,
+                    mirek: light.mirek, mirekMin: light.mirekMin, mirekMax: light.mirekMax,
+                    effect: light.effect, availableEffects: light.availableEffects
+                )
+            }
+            guard changed else { return room }
+            return HueRoom(
+                hueID: room.hueID, kind: room.kind, name: room.name, groupedLight: room.groupedLight,
+                on: room.on, bri: room.bri, onCount: room.onCount, archetype: room.archetype,
+                color: room.color, lights: newLights, scenes: room.scenes
+            )
+        }
+        emit()
+
+        let metaBody: [String: Any] = ["metadata": ["name": clean]]
+        sendResourcePUT(kind: "light", id: id, body: metaBody)
+        if HueColorMath.validUUID(matchedDeviceID) {
+            sendResourcePUT(kind: "device", id: matchedDeviceID, body: metaBody)
+        }
+    }
+
+    @discardableResult
+    public func createRoom(kind: String, name: String, archetype: String, deviceIDs: [String]) async -> String? {
+        guard (kind == "room" || kind == "zone"),
+              let creds = credentials, let session = pinnedSession, let delegate = pinnedDelegate else { return nil }
+        let gen = connGeneration
+        let cleanName = HueColorMath.clean(name, limit: 32)
+        let finalName = cleanName.isEmpty ? (kind == "zone" ? "Zone" : "Room") : cleanName
+        let cleanArch = HueColorMath.clean(archetype, limit: 30)
+        let finalArch = cleanArch.isEmpty ? "other" : cleanArch
+        let children = buildGroupChildren(kind: kind, ids: deviceIDs)
+        let body: [String: Any] = [
+            "metadata": ["name": finalName, "archetype": finalArch],
+            "children": children,
+        ]
+        let result = await Self.performRequest(
+            session: session,
+            delegate: delegate,
+            credentials: creds,
+            method: "POST",
+            path: "/clip/v2/resource/\(kind)",
+            bodyData: Self.encodeJSON(body)
+        )
+        guard connGeneration == gen else { return nil }
+        switch result {
+        case .success(let data):
+            let createdID = Self.extractCreatedRID(from: data)
+            refresh()
+            return createdID
+        case .failure(let err):
+            setError(code: "errCommand", text: "Command failed (\(err.message))", args: [err.message])
+            emit()
+            return nil
+        }
+    }
+
+    @discardableResult
+    public func updateRoom(
+        id: String,
+        kind: String,
+        name: String?,
+        archetype: String?,
+        deviceIDs: [String]?
+    ) async -> Bool {
+        guard HueColorMath.validUUID(id),
+              (kind == "room" || kind == "zone"),
+              let creds = credentials, let session = pinnedSession, let delegate = pinnedDelegate else { return false }
+        let gen = connGeneration
+
+        var body: [String: Any] = [:]
+        var metadata: [String: Any] = [:]
+        if let name = name {
+            let clean = HueColorMath.clean(name, limit: 32)
+            if !clean.isEmpty { metadata["name"] = clean }
+        }
+        if let archetype = archetype {
+            let cleanArch = HueColorMath.clean(archetype, limit: 30)
+            if !cleanArch.isEmpty { metadata["archetype"] = cleanArch }
+        }
+        if !metadata.isEmpty {
+            body["metadata"] = metadata
+        }
+        if let deviceIDs = deviceIDs {
+            body["children"] = buildGroupChildren(kind: kind, ids: deviceIDs)
+        }
+        guard !body.isEmpty else { return true }
+
+        // Optimistic metadata update
+        if !metadata.isEmpty {
+            let nextName = metadata["name"] as? String
+            let nextArch = metadata["archetype"] as? String
+            rooms = rooms.map { room in
+                guard room.hueID == id else { return room }
+                return HueRoom(
+                    hueID: room.hueID, kind: room.kind,
+                    name: nextName ?? room.name,
+                    groupedLight: room.groupedLight,
+                    on: room.on, bri: room.bri, onCount: room.onCount,
+                    archetype: nextArch ?? room.archetype,
+                    color: room.color, lights: room.lights, scenes: room.scenes
+                )
+            }
+            emit()
+        }
+
+        let result = await Self.performRequest(
+            session: session,
+            delegate: delegate,
+            credentials: creds,
+            method: "PUT",
+            path: "/clip/v2/resource/\(kind)/\(id)",
+            bodyData: Self.encodeJSON(body)
+        )
+        guard connGeneration == gen else { return false }
+        switch result {
+        case .success:
+            refresh()
+            return true
+        case .failure(let err):
+            setError(code: "errCommand", text: "Command failed (\(err.message))", args: [err.message])
+            emit()
+            return false
+        }
+    }
+
+    @discardableResult
+    public func deleteRoom(id: String, kind: String) async -> Bool {
+        guard HueColorMath.validUUID(id),
+              (kind == "room" || kind == "zone"),
+              let creds = credentials, let session = pinnedSession, let delegate = pinnedDelegate else { return false }
+        let gen = connGeneration
+        let result = await Self.performRequest(
+            session: session,
+            delegate: delegate,
+            credentials: creds,
+            method: "DELETE",
+            path: "/clip/v2/resource/\(kind)/\(id)",
+            bodyData: nil
+        )
+        guard connGeneration == gen else { return false }
+        switch result {
+        case .success:
+            rooms.removeAll { $0.hueID == id }
+            emit()
+            refresh()
+            return true
+        case .failure(let err):
+            setError(code: "errCommand", text: "Command failed (\(err.message))", args: [err.message])
+            emit()
+            return false
+        }
+    }
+
+    @discardableResult
+    public func createSceneFromRoom(roomID: String, name: String) async -> String? {
+        guard HueColorMath.validUUID(roomID),
+              let room = rooms.first(where: { $0.hueID == roomID }),
+              !room.lights.isEmpty,
+              let creds = credentials, let session = pinnedSession, let delegate = pinnedDelegate else { return nil }
+        let gen = connGeneration
+        let cleanName = HueColorMath.clean(name, limit: 32)
+        let finalName = cleanName.isEmpty ? "Scene" : cleanName
+
+        var actions: [[String: Any]] = []
+        for light in room.lights where HueColorMath.validUUID(light.id) {
+            var act: [String: Any] = ["on": ["on": light.on]]
+            if light.on {
+                if light.dimmable {
+                    act["dimming"] = ["brightness": HueColorMath.clamp(light.bri, 1.0, 100.0)]
+                }
+                if light.supportsColor, let xy = HueColorMath.hexToXY(light.color) {
+                    act["color"] = ["xy": ["x": xy.x, "y": xy.y]]
+                } else if light.supportsCT, let m = light.mirek {
+                    act["color_temperature"] = ["mirek": HueColorMath.clamp(m, light.mirekMin, light.mirekMax)]
+                }
+            }
+            actions.append([
+                "target": ["rid": light.id, "rtype": "light"],
+                "action": act,
+            ])
+        }
+        guard !actions.isEmpty else { return nil }
+
+        let groupType = room.kind == "zone" ? "zone" : "room"
+        let body: [String: Any] = [
+            "metadata": ["name": finalName],
+            "group": ["rid": roomID, "rtype": groupType],
+            "actions": actions,
+        ]
+        let result = await Self.performRequest(
+            session: session,
+            delegate: delegate,
+            credentials: creds,
+            method: "POST",
+            path: "/clip/v2/resource/scene",
+            bodyData: Self.encodeJSON(body)
+        )
+        guard connGeneration == gen else { return nil }
+        switch result {
+        case .success(let data):
+            let createdID = Self.extractCreatedRID(from: data)
+            refresh()
+            return createdID
+        case .failure(let err):
+            setError(code: "errCommand", text: "Command failed (\(err.message))", args: [err.message])
+            emit()
+            return nil
+        }
+    }
+
+    @discardableResult
+    public func updateEntertainmentLocations(
+        areaID: String,
+        positions: [String: (Double, Double, Double)]
+    ) async -> Bool {
+        guard HueColorMath.validUUID(areaID),
+              !positions.isEmpty,
+              let creds = credentials, let session = pinnedSession, let delegate = pinnedDelegate else { return false }
+        let gen = connGeneration
+
+        // Map incoming light IDs to entertainment service IDs when known
+        var byServiceID: [String: (Double, Double, Double)] = [:]
+        for (key, pos) in positions {
+            let clamped = (
+                HueColorMath.clamp(pos.0.isFinite ? pos.0 : 0.0, -1.0, 1.0),
+                HueColorMath.clamp(pos.1.isFinite ? pos.1 : 0.5, 0.0, 1.0),
+                HueColorMath.clamp(pos.2.isFinite ? pos.2 : 0.0, -1.0, 1.0)
+            )
+            let svcID = entertainmentServiceByLight[key] ?? key
+            if HueColorMath.validUUID(svcID) {
+                byServiceID[svcID] = clamped
+            }
+            if HueColorMath.validUUID(key) {
+                byServiceID[key] = clamped
+            }
+        }
+        guard !byServiceID.isEmpty else { return false }
+
+        // Fetch existing entertainment_configuration so we preserve every service_location entry
+        let getRes = await Self.performRequest(
+            session: session,
+            delegate: delegate,
+            credentials: creds,
+            method: "GET",
+            path: "/clip/v2/resource/entertainment_configuration/\(areaID)",
+            bodyData: nil
+        )
+        guard connGeneration == gen else { return false }
+        guard case .success(let data) = getRes,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = root["data"] as? [[String: Any]],
+              let areaDict = entries.first,
+              let locations = areaDict["locations"] as? [String: Any],
+              let existing = locations["service_locations"] as? [[String: Any]],
+              !existing.isEmpty else {
+            return false
+        }
+
+        var updatedLocations: [[String: Any]] = []
+        var anyUpdated = false
+        for loc in existing {
+            guard let svc = loc["service"] as? [String: Any],
+                  let rid = svc["rid"] as? String,
+                  let rtype = svc["rtype"] as? String else { continue }
+            if let pos = byServiceID[rid] {
+                anyUpdated = true
+                updatedLocations.append([
+                    "service": ["rid": rid, "rtype": rtype],
+                    "positions": [["x": pos.0, "y": pos.1, "z": pos.2]],
+                ])
+            } else if let prevPositions = loc["positions"] as? [[String: Any]], !prevPositions.isEmpty {
+                updatedLocations.append([
+                    "service": ["rid": rid, "rtype": rtype],
+                    "positions": prevPositions,
+                ])
+            }
+        }
+        guard anyUpdated, !updatedLocations.isEmpty else { return false }
+
+        let putBody: [String: Any] = [
+            "locations": ["service_locations": updatedLocations],
+        ]
+        let putRes = await Self.performRequest(
+            session: session,
+            delegate: delegate,
+            credentials: creds,
+            method: "PUT",
+            path: "/clip/v2/resource/entertainment_configuration/\(areaID)",
+            bodyData: Self.encodeJSON(putBody)
+        )
+        guard connGeneration == gen else { return false }
+        if case .success = putRes {
+            refresh()
+            return true
+        }
+        return false
+    }
+
+    private func buildGroupChildren(kind: String, ids: [String]) -> [[String: Any]] {
+        let knownLightIDs = Set(rooms.flatMap(\.lights).map(\.id))
+        var seen = Set<String>()
+        var children: [[String: Any]] = []
+        for rawID in ids where HueColorMath.validUUID(rawID) && seen.insert(rawID).inserted {
+            let rtype: String
+            if kind == "zone" && knownLightIDs.contains(rawID) {
+                rtype = "light"
+            } else {
+                rtype = "device"
+            }
+            children.append(["rid": rawID, "rtype": rtype])
+        }
+        return children
+    }
+
+    private nonisolated static func extractCreatedRID(from data: Data) -> String? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = root["data"] as? [[String: Any]],
+              let first = list.first,
+              let rid = first["rid"] as? String,
+              HueColorMath.validUUID(rid) else { return nil }
+        return rid
     }
 
     public func setEntertainmentActive(areaID: String, active: Bool) async -> Bool {
@@ -758,6 +1104,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
             scheduleScriptID = model.scheduleScriptID
             schedules = model.schedules
             entertainmentAreas = model.entertainmentAreas
+            entertainmentServiceByLight = model.entertainmentServiceByLight
             phase = "ok"
             clearError()
             emit()
@@ -893,7 +1240,8 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                 changed = true
                 return HueLight(
                     id: light.id,
-                    name: light.name,
+                    deviceID: light.deviceID,
+                    name: update.name ?? light.name,
                     on: update.on ?? light.on,
                     bri: update.brightness.map { ($0 * 10.0).rounded() / 10.0 } ?? light.bri,
                     dimmable: light.dimmable,
@@ -930,7 +1278,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
             guard room.groupedLight == update.resourceID else { return room }
             let newLights = room.lights.map { light -> HueLight in
                 HueLight(
-                    id: light.id, name: light.name,
+                    id: light.id, deviceID: light.deviceID, name: light.name,
                     on: update.on ?? light.on,
                     bri: update.brightness.map { ($0 * 10.0).rounded() / 10.0 } ?? light.bri,
                     dimmable: light.dimmable, color: light.color, reachable: light.reachable,
@@ -1021,7 +1369,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                 let nextOn = on ?? (bri != nil || mirek != nil || xy != nil || (effect != nil && effect != "no_effect") ? true : light.on)
                 let nextBri = bri.map { Double(HueColorMath.clamp($0, 1, 100)) } ?? light.bri
                 return HueLight(
-                    id: light.id, name: light.name, on: nextOn, bri: nextBri, dimmable: light.dimmable,
+                    id: light.id, deviceID: light.deviceID, name: light.name, on: nextOn, bri: nextBri, dimmable: light.dimmable,
                     color: newColor ?? light.color, reachable: light.reachable,
                     supportsColor: light.supportsColor, supportsCT: light.supportsCT,
                     mirek: mirek ?? light.mirek, mirekMin: light.mirekMin, mirekMax: light.mirekMax,
@@ -1053,7 +1401,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
             if on && excludeRooms.contains(room.id) { return room }
             let newLights = room.lights.map { light -> HueLight in
                 HueLight(
-                    id: light.id, name: light.name, on: on, bri: light.bri, dimmable: light.dimmable,
+                    id: light.id, deviceID: light.deviceID, name: light.name, on: on, bri: light.bri, dimmable: light.dimmable,
                     color: light.color, reachable: light.reachable, supportsColor: light.supportsColor,
                     supportsCT: light.supportsCT, mirek: light.mirek, mirekMin: light.mirekMin,
                     mirekMax: light.mirekMax, effect: light.effect, availableEffects: light.availableEffects
@@ -1220,7 +1568,12 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
             "when": when,
             "where": [["group": ["rid": draft.targetID, "rtype": draft.targetKind]]],
         ]
-        if draft.action == "off" {
+        if draft.action == "scene", HueColorMath.validUUID(draft.sceneID) {
+            config["recall"] = ["rid": draft.sceneID, "rtype": "scene"]
+            if draft.fadeMin > 0 {
+                config["fade_in_duration"] = ["seconds": draft.fadeMin * 60]
+            }
+        } else if draft.action == "off" {
             config["on"] = ["on": false]
             if draft.fadeMin > 0 {
                 config["fade_out_duration"] = ["seconds": draft.fadeMin * 60]

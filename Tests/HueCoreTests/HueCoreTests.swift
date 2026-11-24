@@ -760,3 +760,217 @@ final class DebouncerTests: XCTestCase {
         XCTAssertEqual(sent.last?.0, "light:b")
     }
 }
+
+final class FloorplanTests: XCTestCase {
+    private let livingID = "10000000-0000-0000-0000-000000000001"
+    private let officeID = "10000000-0000-0000-0000-000000000002"
+    private let entAreaID = "70000000-0000-0000-0000-000000000001"
+
+    func testAllSixPrototypesAndAutoMatching() {
+        let light1 = HueLight(id: "30000000-0000-0000-0000-000000000001", deviceID: "80000000-0000-0000-0000-000000000001", name: "Stehlampe", on: true, bri: 75, dimmable: true, color: "#ffaa44")
+        let light2 = HueLight(id: "30000000-0000-0000-0000-000000000002", deviceID: "80000000-0000-0000-0000-000000000002", name: "Schreibtisch", on: true, bri: 90, dimmable: true, color: "#eef6ff")
+        let snap = HueSnapshot(
+            phase: "ok",
+            rooms: [
+                HueRoom(hueID: livingID, kind: "room", name: "Wohnzimmer", groupedLight: "20000000-0000-0000-0000-000000000001", on: true, bri: 75, onCount: 1, archetype: "living_room", color: "#ffaa44", lights: [light1], scenes: []),
+                HueRoom(hueID: officeID, kind: "room", name: "Büro", groupedLight: "20000000-0000-0000-0000-000000000002", on: true, bri: 90, onCount: 1, archetype: "office", color: "#eef6ff", lights: [light2], scenes: []),
+            ],
+            lightCount: 2,
+            onCount: 2,
+            entertainmentAreas: [
+                HueEntertainmentArea(id: entAreaID, name: "Wohnzimmer Sync", channels: [HueEntertainmentChannel(channelID: 0, lightIDs: [light1.id])]),
+            ]
+        )
+
+        XCTAssertEqual(FloorplanTemplate.allCases.count, 6)
+        for tpl in FloorplanTemplate.allCases {
+            let doc = FloorplanTemplate.build(template: tpl, snapshot: snap, bridgeID: "001788FFFE123456")
+            XCTAssertEqual(doc.templateID, tpl.rawValue)
+            XCTAssertEqual(doc.bridgeID, "001788FFFE123456")
+            XCTAssertFalse(doc.boxes.isEmpty, "Template \(tpl.rawValue) should create boxes")
+            XCTAssertFalse(doc.lamps.isEmpty, "Template \(tpl.rawValue) should place lights")
+            if tpl != .deskStudio {
+                XCTAssertTrue(doc.boxes.contains(where: { $0.hueID == livingID }), "Living room should auto-match in \(tpl.rawValue)")
+                XCTAssertTrue(doc.boxes.contains(where: { $0.hueID == officeID }), "Office should auto-match in \(tpl.rawValue)")
+            }
+        }
+    }
+
+    func testContainmentDiffsSyncPlanAndEntertainmentNormalization() throws {
+        let l1 = HueLight(id: "30000000-0000-0000-0000-000000000001", deviceID: "80000000-0000-0000-0000-000000000001", name: "Lamp A", on: true, bri: 80, dimmable: true, color: "#ffd27a")
+        let l2 = HueLight(id: "30000000-0000-0000-0000-000000000002", deviceID: "80000000-0000-0000-0000-000000000002", name: "Lamp B", on: true, bri: 60, dimmable: true, color: "#38bdf8")
+        let snap = HueSnapshot(
+            phase: "ok",
+            rooms: [
+                HueRoom(hueID: livingID, kind: "room", name: "Living Room", groupedLight: "20000000-0000-0000-0000-000000000001", on: true, bri: 80, onCount: 1, archetype: "living_room", color: "#ffd27a", lights: [l1], scenes: []),
+                HueRoom(hueID: officeID, kind: "room", name: "Office", groupedLight: "20000000-0000-0000-0000-000000000002", on: true, bri: 60, onCount: 1, archetype: "office", color: "#38bdf8", lights: [l2], scenes: []),
+            ],
+            lightCount: 2,
+            onCount: 2
+        )
+
+        let livingBox = FloorplanBox(id: "b1", kind: "room", hueID: livingID, name: "Living Room", archetype: "living_room", x: 0, y: 0, width: 400, height: 200, entertainmentAreaID: entAreaID)
+        let officeBox = FloorplanBox(id: "b2", kind: "room", hueID: officeID, name: "Studio", archetype: "office", x: 400, y: 0, width: 400, height: 200)
+        // Move Lamp A into Office box; keep Lamp B inside Office box
+        var doc = FloorplanDocument(
+            bridgeID: "001788FFFE123456",
+            autoSync: true,
+            boxes: [livingBox, officeBox],
+            lamps: [
+                l1.id: FloorplanLampPlacement(x: 500, y: 100, z: 0.5),
+                l2.id: FloorplanLampPlacement(x: 600, y: 100, z: -0.25),
+            ]
+        )
+
+        XCTAssertEqual(FloorplanSpatial.boxContaining(x: 500, y: 100, in: doc.boxes)?.id, "b2")
+        let diffs = FloorplanSpatial.pendingRoomMembershipDiffs(floorplan: doc, snapshot: snap)
+        XCTAssertEqual(diffs.count, 1)
+        XCTAssertEqual(diffs[0].lightID, l1.id)
+        XCTAssertEqual(diffs[0].fromRoomID, livingID)
+        XCTAssertEqual(diffs[0].toRoomID, officeID)
+
+        let plan = FloorplanSpatial.buildSyncPlan(floorplan: doc, snapshot: snap)
+        XCTAssertTrue(plan.hasRoomOrMetaChanges)
+        XCTAssertEqual(plan.boxesToUpdateMeta.map(\.id), ["b2"]) // renamed Office -> Studio
+        XCTAssertEqual(plan.entertainmentBoxes.map(\.id), ["b1"])
+
+        // Place Lamp A at top-left (x=0,y=0) and Lamp B at bottom-right (x=400,y=200) inside livingBox
+        doc.lamps[l1.id] = FloorplanLampPlacement(x: 0, y: 0, z: 0.8)
+        doc.lamps[l2.id] = FloorplanLampPlacement(x: 400, y: 200, z: -0.5)
+        let positions = FloorplanSpatial.entertainmentPositions(forBox: livingBox, floorplan: doc, snapshot: snap)
+        let p1 = try XCTUnwrap(positions[l1.id])
+        XCTAssertEqual(p1.0, -1.0, accuracy: 0.001)
+        XCTAssertEqual(p1.1, 1.0, accuracy: 0.001)
+        XCTAssertEqual(p1.2, 0.8, accuracy: 0.001)
+        let p2 = try XCTUnwrap(positions[l2.id])
+        XCTAssertEqual(p2.0, 1.0, accuracy: 0.001)
+        XCTAssertEqual(p2.1, 0.0, accuracy: 0.001)
+        XCTAssertEqual(p2.2, -0.5, accuracy: 0.001)
+    }
+
+    func testFloorplanBackgroundSanitizationAndPersistence() throws {
+        // Reject path traversal, hidden files, and unsupported extensions
+        XCTAssertNil(FloorplanBackground.sanitizeFileName("../secret.png"))
+        XCTAssertNil(FloorplanBackground.sanitizeFileName("sub/floor.png"))
+        XCTAssertNil(FloorplanBackground.sanitizeFileName("floor\\plan.jpg"))
+        XCTAssertNil(FloorplanBackground.sanitizeFileName(".hidden.png"))
+        XCTAssertNil(FloorplanBackground.sanitizeFileName("vector.svg"))
+        XCTAssertEqual(FloorplanBackground.sanitizeFileName("floorplan-bg-demo.png"), "floorplan-bg-demo.png")
+
+        let bg = FloorplanBackground(fileName: "floorplan-bg.jpg", opacity: 2.5, fit: .cover)
+        XCTAssertEqual(bg.opacity, 1.0, accuracy: 0.0001)
+        XCTAssertEqual(bg.fit, .cover)
+        let bgLow = FloorplanBackground(fileName: "floorplan-bg.webp", opacity: -0.4, fit: .contain)
+        XCTAssertEqual(bgLow.opacity, FloorplanBackground.minOpacity, accuracy: 0.0001)
+
+        // Round-trip per-bridge floorplan.json + background image in temp SettingsStore
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("hue-fp-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let store = SettingsStore(directory: tempDir)
+
+        let doc = FloorplanDocument(
+            bridgeID: "001788FFFE123456",
+            autoSync: true,
+            background: bg,
+            boxes: [FloorplanBox(id: "b1", kind: "room", name: "Hall", x: 20, y: 40, width: 200, height: 150)],
+            stamps: [FloorplanStamp(id: "s1", kind: "door", x: 30, y: 40, rotation: 90)],
+            lamps: ["30000000-0000-0000-0000-000000000001": FloorplanLampPlacement(x: 80, y: 90, z: 0.2, icon: .floor)]
+        )
+        try store.saveFloorplan(doc)
+        let loaded = try XCTUnwrap(store.loadFloorplan(bridgeID: "001788FFFE123456"))
+        XCTAssertEqual(loaded, doc)
+        XCTAssertTrue(loaded.autoSync)
+
+        // Save valid PNG background & reject unsupported extension
+        let fakePNG = tempDir.appendingPathComponent("input.png")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: fakePNG)
+        let savedName = try store.saveFloorplanBackground(from: fakePNG, bridgeID: "001788FFFE123456")
+        XCTAssertTrue(savedName.hasSuffix(".png"))
+        XCTAssertNotNil(store.floorplanBackgroundURL(fileName: savedName))
+        XCTAssertNil(store.floorplanBackgroundURL(fileName: "../input.png"))
+        store.clearFloorplanBackground(fileName: savedName)
+        XCTAssertNil(store.floorplanBackgroundURL(fileName: savedName))
+
+        let badFile = tempDir.appendingPathComponent("bad.txt")
+        try Data("nope".utf8).write(to: badFile)
+        XCTAssertThrowsError(try store.saveFloorplanBackground(from: badFile))
+    }
+
+    func testLampIconCodableRoundTripAndFallback() throws {
+        XCTAssertEqual(LampIcon.allCases.count, 12)
+        for icon in LampIcon.allCases {
+            XCTAssertFalse(icon.sfSymbol(lit: true).isEmpty)
+            XCTAssertFalse(icon.sfSymbol(lit: false).isEmpty)
+            let lamp = FloorplanLamp(x: 10, y: 20, z: 0, icon: icon)
+            let data = try JSONEncoder().encode(lamp)
+            let decoded = try JSONDecoder().decode(FloorplanLamp.self, from: data)
+            XCTAssertEqual(decoded.icon, icon)
+        }
+        // Missing icon key in JSON falls back to .bulb
+        let missingIcon = try JSONDecoder().decode(FloorplanLamp.self, from: Data(#"{"x":50,"y":60,"z":0}"#.utf8))
+        XCTAssertEqual(missingIcon.icon, .bulb)
+        // Unknown icon falls back to .bulb; legacy aliases decode cleanly
+        let unknownIcon = try JSONDecoder().decode(FloorplanLamp.self, from: Data(#"{"x":50,"y":60,"z":0,"icon":"spaceship"}"#.utf8))
+        XCTAssertEqual(unknownIcon.icon, .bulb)
+        let legacyFloor = try JSONDecoder().decode(FloorplanLamp.self, from: Data(#"{"x":50,"y":60,"z":0,"icon":"floor_lamp"}"#.utf8))
+        XCTAssertEqual(legacyFloor.icon, .floor)
+        XCTAssertEqual(LampIcon.inferred(for: "TV Play Bars"), .bar)
+        XCTAssertEqual(LampIcon.inferred(for: "Bedside Left"), .table)
+    }
+
+    @MainActor
+    func testDemoBridgeClientTwoWayMutations() async throws {
+        let demo = DemoBridgeClient()
+
+        // Rename light with markup sanitization
+        demo.renameLight(id: DemoBridgeClient.deskLampID, name: "<b>Studio</b> Desk")
+        XCTAssertEqual(demo.currentSnapshot().light(DemoBridgeClient.deskLampID)?.name, "bStudio/b Desk")
+
+        // Create room moving desk lamp device out of Office
+        let deskDevice = try XCTUnwrap(demo.currentSnapshot().light(DemoBridgeClient.deskLampID)?.deviceID)
+        XCTAssertFalse(deskDevice.isEmpty)
+        let createdRoomID = await demo.createRoom(kind: "room", name: "Reading Nook", archetype: "lounge", deviceIDs: [deskDevice])
+        let newRoomID = try XCTUnwrap(createdRoomID)
+        let afterCreate = demo.currentSnapshot()
+        XCTAssertTrue(afterCreate.room(newRoomID)?.lights.contains(where: { $0.id == DemoBridgeClient.deskLampID }) == true)
+        XCTAssertFalse(afterCreate.room(DemoBridgeClient.officeRoomID)?.lights.contains(where: { $0.id == DemoBridgeClient.deskLampID }) == true)
+
+        // Update room name & create scene from current state
+        let updated = await demo.updateRoom(id: newRoomID, kind: "room", name: "Cozy Nook", archetype: "living_room", deviceIDs: nil)
+        XCTAssertTrue(updated)
+        XCTAssertEqual(demo.currentSnapshot().room(newRoomID)?.name, "Cozy Nook")
+
+        let createdSceneID = await demo.createSceneFromRoom(roomID: newRoomID, name: "Late Night")
+        let sceneID = try XCTUnwrap(createdSceneID)
+        XCTAssertTrue(demo.currentSnapshot().room(newRoomID)?.scenes.contains(where: { $0.id == sceneID && $0.name == "Late Night" }) == true)
+
+        // Schedule scene on that room
+        demo.createSchedule(HueScheduleDraft(
+            name: "Night Nook",
+            targetKind: "room",
+            targetID: newRoomID,
+            targetName: "Cozy Nook",
+            triggerKind: "time",
+            time: "21:30",
+            action: "scene",
+            bri: nil,
+            sceneID: sceneID
+        ))
+        XCTAssertTrue(demo.currentSnapshot().schedules.contains(where: { $0.action == "scene" && $0.sceneID == sceneID }))
+
+        // Entertainment locations sync
+        let entOK = await demo.updateEntertainmentLocations(
+            areaID: entAreaID,
+            positions: [DemoBridgeClient.deskLampID: (0.25, 0.75, 0.5)]
+        )
+        XCTAssertTrue(entOK)
+        XCTAssertEqual(demo.entertainmentPositions[entAreaID]?[DemoBridgeClient.deskLampID]?.0 ?? 0, 0.25, accuracy: 0.001)
+
+        // Delete room moves lights to "other"
+        let deleted = await demo.deleteRoom(id: newRoomID, kind: "room")
+        XCTAssertTrue(deleted)
+        XCTAssertNil(demo.currentSnapshot().room(newRoomID))
+        XCTAssertNotNil(demo.currentSnapshot().light(DemoBridgeClient.deskLampID))
+    }
+}

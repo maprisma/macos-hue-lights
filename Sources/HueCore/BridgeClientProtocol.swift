@@ -15,9 +15,10 @@ public struct HueScheduleDraft: Equatable, Sendable {
     public var offsetMin: Int
     /// Weekday names (e.g. ["monday", "tuesday"]), empty = daily
     public var days: [String]
-    /// "on" or "off"
+    /// "on", "off", or "scene"
     public var action: String
     public var bri: Int?
+    public var sceneID: String
     public var fadeMin: Int
 
     public init(
@@ -31,6 +32,7 @@ public struct HueScheduleDraft: Equatable, Sendable {
         days: [String] = [],
         action: String = "on",
         bri: Int? = 80,
+        sceneID: String = "",
         fadeMin: Int = 0
     ) {
         self.name = name
@@ -43,6 +45,7 @@ public struct HueScheduleDraft: Equatable, Sendable {
         self.days = days
         self.action = action
         self.bri = bri
+        self.sceneID = sceneID
         self.fadeMin = fadeMin
     }
 }
@@ -52,6 +55,7 @@ public struct HueScheduleDraft: Equatable, Sendable {
 @MainActor
 public protocol HueBridgeControlling: AnyObject {
     var onSnapshot: ((HueSnapshot) -> Void)? { get set }
+    var bridgeID: String { get }
 
     func start()
     func stop()
@@ -90,6 +94,19 @@ public protocol HueBridgeControlling: AnyObject {
 
     func setRules(_ rules: [HueRule], paused: Bool)
     func triggerDesktopEvent(_ event: String)
+
+    // Two-way Hue Bridge CLIP v2 spatial & organization mutations
+    func renameLight(id: String, name: String)
+    @discardableResult
+    func createRoom(kind: String, name: String, archetype: String, deviceIDs: [String]) async -> String?
+    @discardableResult
+    func updateRoom(id: String, kind: String, name: String?, archetype: String?, deviceIDs: [String]?) async -> Bool
+    @discardableResult
+    func deleteRoom(id: String, kind: String) async -> Bool
+    @discardableResult
+    func createSceneFromRoom(roomID: String, name: String) async -> String?
+    @discardableResult
+    func updateEntertainmentLocations(areaID: String, positions: [String: (Double, Double, Double)]) async -> Bool
 
     /// Bridge credentials for optional Entertainment v2 DTLS streaming (nil in Demo Mode or unpaired).
     var entertainmentCredentials: BridgeCredentials? { get }

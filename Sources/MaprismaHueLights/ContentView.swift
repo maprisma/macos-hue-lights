@@ -26,7 +26,7 @@ struct ContentView: View {
                 case .settings:
                     SettingsView()
                 case .main:
-                    MainView()
+                    MainView(mode: mode)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -177,6 +177,7 @@ struct TabBarView: View {
     var body: some View {
         HStack(spacing: 4) {
             tabButton(.lights, title: store.tr("Lights"), symbol: "lightbulb", badge: nil, activeDot: false)
+            tabButton(.map, title: store.tr("Map"), symbol: "map", badge: nil, activeDot: store.pendingFloorplanSyncPlan.hasRoomOrMetaChanges)
             tabButton(.schedules, title: store.tr("Schedules"), symbol: "clock",
                       badge: store.allSchedules.isEmpty ? nil : store.allSchedules.count, activeDot: false)
             tabButton(.rules, title: store.tr("Rules"), symbol: "link",
@@ -229,6 +230,7 @@ struct TabBarView: View {
 
 struct MainView: View {
     @EnvironmentObject var store: HueStore
+    var mode: ContentView.DisplayMode = .popover
 
     var body: some View {
         VStack(spacing: 0) {
@@ -241,6 +243,8 @@ struct MainView: View {
                     RoomsView()
                     Divider()
                     FooterView()
+                case .map:
+                    MapView(isCompact: mode == .popover)
                 case .schedules:
                     SchedulesView()
                 case .rules:

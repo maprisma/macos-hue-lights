@@ -8,6 +8,7 @@ import CoreFoundation
 
 public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
     public let id: String
+    public var deviceID: String = ""
     public let name: String
     public let on: Bool
     public let bri: Double
@@ -24,6 +25,7 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
 
     public init(
         id: String,
+        deviceID: String = "",
         name: String,
         on: Bool,
         bri: Double,
@@ -39,6 +41,7 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
         availableEffects: [String] = []
     ) {
         self.id = id
+        self.deviceID = deviceID
         self.name = name
         self.on = on
         self.bri = bri
@@ -56,6 +59,7 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
 
     public init(json: [String: Any]) {
         id = JSONValue.string(json, "id")
+        deviceID = JSONValue.string(json, "device_id")
         name = JSONValue.string(json, "name")
         on = JSONValue.bool(json, "on")
         bri = JSONValue.number(json, "bri")
@@ -756,6 +760,7 @@ public struct HueBuiltModel: Equatable, Sendable {
     public let scheduleScriptID: String
     public let schedules: [HueSchedule]
     public let entertainmentAreas: [HueEntertainmentArea]
+    public let entertainmentServiceByLight: [String: String]
 
     public init(
         rooms: [HueRoom],
@@ -764,7 +769,8 @@ public struct HueBuiltModel: Equatable, Sendable {
         bridgeHomeGroupedLight: String,
         scheduleScriptID: String,
         schedules: [HueSchedule],
-        entertainmentAreas: [HueEntertainmentArea] = []
+        entertainmentAreas: [HueEntertainmentArea] = [],
+        entertainmentServiceByLight: [String: String] = [:]
     ) {
         self.rooms = rooms
         self.lightCount = lightCount
@@ -773,6 +779,7 @@ public struct HueBuiltModel: Equatable, Sendable {
         self.scheduleScriptID = scheduleScriptID
         self.schedules = schedules
         self.entertainmentAreas = entertainmentAreas
+        self.entertainmentServiceByLight = entertainmentServiceByLight
     }
 }
 
@@ -864,6 +871,7 @@ public enum HueModelBuilder {
 
             return HueLight(
                 id: id,
+                deviceID: owner ?? "",
                 name: name.isEmpty ? "Light" : name,
                 on: isOn,
                 bri: bri,
@@ -880,21 +888,34 @@ public enum HueModelBuilder {
             )
         }
 
-        // Map each device to its light service IDs (deduped, capped)
+        // Map each device to its light service IDs (deduped, capped) and optional entertainment service ID
         var deviceLights: [String: [String]] = [:]
+        var entertainmentServiceByLight: [String: String] = [:]
         for (did, device) in devices {
             var found: [String] = []
             var seen = Set<String>()
+            var entServiceID: String? = nil
             for svc in (device["services"] as? [[String: Any]]) ?? [] {
-                if (svc["rtype"] as? String) == "light",
-                   let rid = svc["rid"] as? String,
+                let rtype = svc["rtype"] as? String
+                let rid = svc["rid"] as? String
+                if rtype == "light",
+                   let rid = rid,
                    lights[rid] != nil,
                    seen.insert(rid).inserted {
                     found.append(rid)
                     if found.count >= maxGroupLights { break }
+                } else if rtype == "entertainment",
+                          let rid = rid,
+                          HueColorMath.validUUID(rid) {
+                    entServiceID = rid
                 }
             }
             deviceLights[did] = found
+            if let entID = entServiceID {
+                for lid in found {
+                    entertainmentServiceByLight[lid] = entID
+                }
+            }
         }
 
         var budget = maxMemberships
@@ -1211,7 +1232,8 @@ public enum HueModelBuilder {
             bridgeHomeGroupedLight: bridgeHomeGL,
             scheduleScriptID: scheduleScriptID,
             schedules: schedules,
-            entertainmentAreas: entertainmentAreas
+            entertainmentAreas: entertainmentAreas,
+            entertainmentServiceByLight: entertainmentServiceByLight
         )
     }
 }

@@ -190,7 +190,12 @@ private struct ScheduleCard: View {
 
     private var actionText: String {
         if schedule.action == "off" { return store.tr("Off") }
-        if schedule.action == "scene" { return store.tr("Scene") }
+        if schedule.action == "scene" {
+            if let sceneName = store.sceneName(for: schedule.sceneID) {
+                return "\(store.tr("Scene")): \(sceneName)"
+            }
+            return store.tr("Scene")
+        }
         if let bri = schedule.bri {
             return "\(store.tr("On")) \(bri)%"
         }
