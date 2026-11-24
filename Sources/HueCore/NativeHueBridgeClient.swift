@@ -165,16 +165,20 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
     }
 
     private nonisolated func resolveBonjourResult(_ result: NWBrowser.Result, collector: DiscoveryCollector, discoveryGen: Int) {
-        var name = "Hue Bridge"
-        if case .service(let svcName, _, _, _) = result.endpoint {
-            let cleaned = HueColorMath.clean(svcName)
-            if !cleaned.isEmpty { name = cleaned }
-        }
-        var bridgeID = ""
-        if case .bonjour(let txt) = result.metadata, let raw = txt["bridgeid"] {
-            let upper = raw.uppercased()
-            if HueColorMath.validBridgeID(upper) { bridgeID = upper }
-        }
+        let resolvedName: String = {
+            if case .service(let svcName, _, _, _) = result.endpoint {
+                let cleaned = HueColorMath.clean(svcName)
+                if !cleaned.isEmpty { return cleaned }
+            }
+            return "Hue Bridge"
+        }()
+        let resolvedBridgeID: String = {
+            if case .bonjour(let txt) = result.metadata, let raw = txt["bridgeid"] {
+                let upper = raw.uppercased()
+                if HueColorMath.validBridgeID(upper) { return upper }
+            }
+            return ""
+        }()
 
         let conn = NWConnection(to: result.endpoint, using: .tcp)
         let resolvedFlag = AtomicFlag()
@@ -185,7 +189,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
                    case .hostPort(host: let host, port: _) = conn.currentPath?.remoteEndpoint,
                    let ip = Self.extractIPv4(from: host),
                    HueColorMath.validBridgeIP(ip) {
-                    let cand = BridgeCandidate(ip: ip, bridgeID: bridgeID, name: name)
+                    let cand = BridgeCandidate(ip: ip, bridgeID: resolvedBridgeID, name: resolvedName)
                     let updated = collector.add(cand)
                     Task { @MainActor [weak self] in
                         guard let self = self, self.discovering, self.discoveryGeneration == discoveryGen else { return }
@@ -1485,13 +1489,13 @@ final class HuePinnedSessionDelegate: NSObject, URLSessionDelegate, @unchecked S
             lock.lock()
             _capturedPeer = PeerInfo(fingerprint: fp, commonName: cn)
             lock.unlock()
-            completionHandler(.useCredential(URLCredential(trust: serverTrust)), nil)
+            completionHandler(.useCredential, URLCredential(trust: serverTrust))
 
         case .pinned(let expectedFP, let expectedBridgeID):
             let fpOK = fp.lowercased() == expectedFP.lowercased()
             let cnOK = expectedBridgeID.isEmpty || cn.uppercased() == expectedBridgeID.uppercased()
             if fpOK && cnOK {
-                completionHandler(.useCredential(URLCredential(trust: serverTrust)), nil)
+                completionHandler(.useCredential, URLCredential(trust: serverTrust))
             } else {
                 markPinFailed()
                 completionHandler(.cancelAuthenticationChallenge, nil)

@@ -151,8 +151,6 @@ public final class EntertainmentStreamer {
         // TLS_PSK_WITH_AES_128_GCM_SHA256 (0x00A8) — required by Philips Hue Entertainment API v2
         if let suite = tls_ciphersuite_t(rawValue: 0x00A8) {
             sec_protocol_options_append_tls_ciphersuite(secOpts, suite)
-        } else {
-            sec_protocol_options_add_tls_ciphersuite(secOpts, SSLCipherSuite(0x00A8))
         }
 
         let pskDispatch = pskBytes.withUnsafeBytes { ptr in
