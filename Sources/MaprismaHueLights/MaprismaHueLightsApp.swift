@@ -2,9 +2,9 @@ import AppKit
 import HueCore
 import SwiftUI
 
-/// Maprisma Hue Lights for macOS: a menu bar bulb (lit while any light is on, outlined when all are
-/// off or no bridge is paired) that opens a ~430×600 pt window with pairing, rooms, zones, lights,
-/// scenes and settings. No Dock icon (LSUIElement in Info.plist, accessory policy here as well).
+/// Maprisma Hue Lights for macOS: a 100% pure-Swift, App Sandbox-compliant menu bar app
+/// with an optional detachable resizable window, Light Synthesizer, Light Themes, App Skins,
+/// global hotkeys, and Apple Shortcuts (`AppIntents`).
 @main
 struct MaprismaHueLightsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -12,42 +12,106 @@ struct MaprismaHueLightsApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            ContentView()
+            ContentView(mode: .popover)
                 .environmentObject(store)
         } label: {
-            MenuBarIcon(lit: store.snapshot.anyLightOn, summary: store.l10n.summary(store.snapshot))
+            MenuBarIcon(
+                style: store.menuBarIcon,
+                lit: store.snapshot.anyLightOn,
+                onCount: store.snapshot.onCount,
+                showCount: store.showMenuBarCount,
+                synthRunning: store.synthRunning,
+                summary: store.l10n.summary(store.snapshot)
+            )
         }
         .menuBarExtraStyle(.window)
+
+        Window("Maprisma Lights", id: "main-window") {
+            ContentView(mode: .detached)
+                .environmentObject(store)
+        }
+        .defaultSize(width: 760, height: 640)
     }
 }
 
 struct MenuBarIcon: View {
+    let style: MenuBarIconStyle
     let lit: Bool
+    let onCount: Int
+    let showCount: Bool
+    let synthRunning: Bool
     let summary: String
 
     var body: some View {
-        Image(systemName: lit ? "lightbulb.fill" : "lightbulb")
-            .accessibilityLabel(Text("Maprisma Hue Lights: \(summary)"))
-            .help(summary)
+        HStack(spacing: 3) {
+            Image(systemName: style == .bulb ? (lit ? "lightbulb.fill" : "lightbulb") : style.symbol(lit: lit))
+            if synthRunning {
+                Image(systemName: "waveform")
+            }
+            if showCount && onCount > 0 {
+                Text("\(onCount)")
+                    .monospacedDigit()
+            }
+        }
+        .accessibilityLabel(Text("Maprisma Lights: \(summary)"))
+        .help(summary)
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var termination: DispatchSourceSignal?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var distributedObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        // SIGTERM (logout, `kill`, launchd) quits like the Quit button, so the helper is ended too.
+
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler { Task { @MainActor in NSApp.terminate(nil) } }
         source.resume()
         termination = source
+
+        registerDesktopEventObservers()
         HueStore.shared.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        let ws = NSWorkspace.shared.notificationCenter
+        for token in workspaceObservers { ws.removeObserver(token) }
+        workspaceObservers.removeAll()
+
+        let dist = DistributedNotificationCenter.default()
+        for token in distributedObservers { dist.removeObserver(token) }
+        distributedObservers.removeAll()
+
         HueStore.shared.shutdown()
+    }
+
+    private func registerDesktopEventObservers() {
+        let ws = NSWorkspace.shared.notificationCenter
+        workspaceObservers.append(
+            ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+                Task { @MainActor in HueStore.shared.handleDesktopEvent("wake") }
+            }
+        )
+        workspaceObservers.append(
+            ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+                Task { @MainActor in HueStore.shared.handleDesktopEvent("sleep") }
+            }
+        )
+
+        let dist = DistributedNotificationCenter.default()
+        distributedObservers.append(
+            dist.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in
+                Task { @MainActor in HueStore.shared.handleDesktopEvent("wake") }
+            }
+        )
+        distributedObservers.append(
+            dist.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in
+                Task { @MainActor in HueStore.shared.handleDesktopEvent("sleep") }
+            }
+        )
     }
 }

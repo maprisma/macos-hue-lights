@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds Maprisma Hue Lights and installs it into /Applications when that is writable, else into
+# Builds Maprisma Lights and installs it into /Applications when that is writable, else into
 # ~/Applications. INSTALL_DIR=/some/folder overrides the choice; --open launches it afterwards.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME="Maprisma Hue Lights"
+APP_NAME="Maprisma Lights"
 EXECUTABLE="MaprismaHueLights"
 OPEN_AFTER=0
 for arg in "$@"; do

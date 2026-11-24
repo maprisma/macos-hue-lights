@@ -1,18 +1,17 @@
 // swift-tools-version:5.9
-// Maprisma Hue Lights for macOS: a SwiftUI menu bar app (MenuBarExtra, window style) on top of
-// the same stdlib-only Python bridge helper as the Linux apps (scripts/hue-lights.py).
+// Maprisma Hue Lights for macOS: a 100% pure-Swift, App Sandbox-compliant SwiftUI menu bar
+// & detachable window app talking directly to the Philips Hue Bridge CLIP v2 HTTPS API.
 import PackageDescription
 
 var targets: [Target] = [
-    // Foundation only (no AppKit/SwiftUI): the helper protocol, models, translations,
-    // the subprocess supervisor and the slider debouncer. Builds and tests on Linux too.
+    // Core Hue models, CLIP v2 parser, SSE parser, rule engine, demo bridge, settings & native client.
     .target(name: "HueCore", path: "Sources/HueCore"),
     .testTarget(name: "HueCoreTests", dependencies: ["HueCore"], path: "Tests/HueCoreTests"),
 ]
 var products: [Product] = []
 
 #if os(macOS)
-// The SwiftUI menu bar app itself (AppKit/SwiftUI exist only on macOS).
+// The SwiftUI menu bar & window app itself (AppKit/SwiftUI/ServiceManagement exist only on macOS).
 targets.append(.executableTarget(
     name: "MaprismaHueLights",
     dependencies: ["HueCore"],

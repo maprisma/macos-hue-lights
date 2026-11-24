@@ -25,18 +25,9 @@ jobs:
           uname -m
           swift --version
           python3 --version
-          /usr/bin/python3 --version || true
 
-      - name: Python tests (helper, stdlib only)
+      - name: Python tests (repo & translation verification)
         run: python3 -m unittest discover -s tests -v
-
-      - name: Python tests with the system /usr/bin/python3
-        run: |
-          if /usr/bin/python3 -c 'import sys' 2>/dev/null; then
-            /usr/bin/python3 -m unittest discover -s tests -p 'test_macos_hue.py' -v
-          else
-            echo "No system python3 on this runner; skipped."
-          fi
 
       - name: Swift tests (HueCore)
         run: swift test
@@ -47,14 +38,21 @@ jobs:
       - name: Verify app bundle
         run: |
           set -euo pipefail
-          APP="dist/Maprisma Hue Lights.app"
+          APP="dist/Maprisma Lights.app"
           PLIST="$APP/Contents/Info.plist"
           test -d "$APP"
           test -x "$APP/Contents/MacOS/MaprismaHueLights"
-          test -x "$APP/Contents/Resources/scripts/hue-lights.py"
+          test ! -e "$APP/Contents/Resources/scripts/hue-lights.py"
+          test ! -e "$APP/Contents/Resources/LICENSE"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          test -f "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
           test -f "$APP/Contents/Resources/translations/bundled.json"
           plutil -lint "$PLIST"
+          plutil -lint "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = "com.maprisma.lights"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$PLIST")" = "Maprisma Lights"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$PLIST")" = "true"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$PLIST")" = "false"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")" = "MaprismaHueLights"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")" = "13.0"
           /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$PLIST"
@@ -66,30 +64,23 @@ jobs:
           catalogs = json.load(open(sys.argv[1]))
           assert set(catalogs) == {"en", "de", "fr", "es", "it", "pt", "nl", "pl"}, catalogs.keys()
           EOF
-          # The bundled helper answers with a JSON snapshot and exits on EOF.
-          HOME_DIR="$(mktemp -d)"
-          printf '{"cmd":"panel_closed"}\n' \
-            | XDG_CONFIG_HOME="$HOME_DIR" python3 -I "$APP/Contents/Resources/scripts/hue-lights.py" \
-            | head -n 1 \
-            | python3 -c 'import json, sys; assert json.loads(sys.stdin.readline())["phase"] == "unpaired"'
           echo "Bundle OK"
 
       - name: Smoke-launch the app
         run: |
-          APP="dist/Maprisma Hue Lights.app"
+          APP="dist/Maprisma Lights.app"
           "$APP/Contents/MacOS/MaprismaHueLights" &
           PID=$!
           sleep 5
           kill -0 "$PID"          # still running (menu bar app, no window needed)
-          pgrep -f "hue-lights.py" # its helper is up
           kill -TERM "$PID"
-          sleep 3
-          ! pgrep -f "Contents/Resources/scripts/hue-lights.py"
+          sleep 2
+          ! kill -0 "$PID" 2>/dev/null
 
       - name: Zip app
-        run: ditto -c -k --keepParent "dist/Maprisma Hue Lights.app" "dist/Maprisma-Hue-Lights-macOS.zip"
+        run: ditto -c -k --keepParent "dist/Maprisma Lights.app" "dist/Maprisma-Lights-macOS.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Maprisma-Hue-Lights-macOS
-          path: dist/Maprisma-Hue-Lights-macOS.zip
+          name: Maprisma-Lights-macOS
+          path: dist/Maprisma-Lights-macOS.zip

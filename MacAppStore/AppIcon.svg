@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- macOS HIG squircle background gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#171e38"/>
+      <stop offset="50%" stop-color="#12172c"/>
+      <stop offset="100%" stop-color="#1d1333"/>
+    </linearGradient>
+
+    <!-- Subtle top glass highlight -->
+    <linearGradient id="topSheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Prism ambient aura behind the bulb -->
+    <radialGradient id="prismWarm" cx="50%" cy="43%" r="44%">
+      <stop offset="0%" stop-color="#ffca58" stop-opacity="0.65"/>
+      <stop offset="38%" stop-color="#ff6b6b" stop-opacity="0.28"/>
+      <stop offset="68%" stop-color="#a855f7" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#12172c" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="prismCyan" cx="32%" cy="32%" r="36%">
+      <stop offset="0%" stop-color="#38f2e6" stop-opacity="0.34"/>
+      <stop offset="65%" stop-color="#38f2e6" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#38f2e6" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="prismMagenta" cx="70%" cy="36%" r="34%">
+      <stop offset="0%" stop-color="#ff4db8" stop-opacity="0.32"/>
+      <stop offset="65%" stop-color="#ff4db8" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#ff4db8" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Luminous bulb glass gradient (warm gold core -> prism cyan/coral rim) -->
+    <radialGradient id="bulbBody" cx="46%" cy="38%" r="58%">
+      <stop offset="0%" stop-color="#fffdf2"/>
+      <stop offset="28%" stop-color="#ffe58f"/>
+      <stop offset="62%" stop-color="#ffaa4c"/>
+      <stop offset="86%" stop-color="#ff5e9c"/>
+      <stop offset="100%" stop-color="#4de2e6"/>
+    </radialGradient>
+
+    <!-- Glass specular highlight on bulb -->
+    <linearGradient id="bulbSpec" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.72"/>
+      <stop offset="55%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Metallic screw base gradient -->
+    <linearGradient id="metalBase" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#69748f"/>
+      <stop offset="24%" stop-color="#c6d0e6"/>
+      <stop offset="52%" stop-color="#eef3ff"/>
+      <stop offset="78%" stop-color="#9aa6c2"/>
+      <stop offset="100%" stop-color="#555f78"/>
+    </linearGradient>
+
+    <linearGradient id="metalCap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4a536b"/>
+      <stop offset="45%" stop-color="#8d99b8"/>
+      <stop offset="100%" stop-color="#3c4459"/>
+    </linearGradient>
+
+    <!-- Subtle prism ring stroke -->
+    <linearGradient id="ringPrism" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4de2e6" stop-opacity="0.55"/>
+      <stop offset="50%" stop-color="#ffd166" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ff4db8" stop-opacity="0.55"/>
+    </linearGradient>
+
+    <!-- Border rim -->
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6cf2ea" stop-opacity="0.45"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#ff6ec7" stop-opacity="0.40"/>
+    </linearGradient>
+
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="22" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="dropShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#050712" flood-opacity="0.55"/>
+    </filter>
+
+    <clipPath id="squircle">
+      <rect x="82" y="82" width="860" height="860" rx="194" ry="194"/>
+    </clipPath>
+  </defs>
+
+  <!-- Full-bleed App Store canvas (Apple masks automatically, or squircle with soft drop shadow for standalone) -->
+  <rect x="82" y="82" width="860" height="860" rx="194" ry="194" fill="url(#bg)" filter="url(#dropShadow)"/>
+
+  <g clip-path="url(#squircle)">
+    <!-- Ambient prism light layers -->
+    <rect x="82" y="82" width="860" height="860" fill="url(#prismWarm)"/>
+    <rect x="82" y="82" width="860" height="860" fill="url(#prismCyan)"/>
+    <rect x="82" y="82" width="860" height="860" fill="url(#prismMagenta)"/>
+
+    <!-- Concentric light / music pulse rings -->
+    <circle cx="512" cy="434" r="326" fill="none" stroke="url(#ringPrism)" stroke-width="5" opacity="0.28"/>
+    <circle cx="512" cy="434" r="264" fill="none" stroke="url(#ringPrism)" stroke-width="6" opacity="0.42"/>
+
+    <!-- Top glass sheen -->
+    <rect x="82" y="82" width="860" height="430" fill="url(#topSheen)"/>
+
+    <!-- Smart Bulb Silhouette -->
+    <g filter="url(#glow)">
+      <path d="M512 222
+               C392 222 298 314 298 430
+               C298 504 338 566 382 612
+               C402 634 414 656 418 682
+               L606 682
+               C610 656 622 634 642 612
+               C686 566 726 504 726 430
+               C726 314 632 222 512 222 Z"
+            fill="url(#bulbBody)"/>
+    </g>
+
+    <!-- Crisp bulb rim & inner filament arc -->
+    <path d="M512 222
+             C392 222 298 314 298 430
+             C298 504 338 566 382 612
+             C402 634 414 656 418 682
+             L606 682
+             C610 656 622 634 642 612
+             C686 566 726 504 726 430
+             C726 314 632 222 512 222 Z"
+          fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="4"/>
+
+    <!-- Glossy specular crescent on upper-left of bulb -->
+    <path d="M484 252
+             C396 262 332 332 330 422
+             C330 444 358 446 364 424
+             C376 356 422 304 492 288
+             C514 282 508 249 484 252 Z"
+          fill="url(#bulbSpec)"/>
+
+    <!-- Inner glowing modern filament loop -->
+    <path d="M466 668 L466 520 C466 488 446 468 446 438 C446 400 475 372 512 372 C549 372 578 400 578 438 C578 468 558 488 558 520 L558 668"
+          fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M474 446 Q512 406 550 446"
+          fill="none" stroke="#fff7d6" stroke-width="12" stroke-linecap="round"/>
+
+    <!-- Screw base (3 sleek metallic bands + bottom contact) -->
+    <rect x="416" y="694" width="192" height="34" rx="17" fill="url(#metalBase)"/>
+    <rect x="424" y="738" width="176" height="34" rx="17" fill="url(#metalBase)"/>
+    <rect x="438" y="782" width="148" height="32" rx="16" fill="url(#metalBase)"/>
+    <path d="M468 814 L556 814 L540 842 C534 852 524 858 512 858 C500 858 490 852 484 842 Z"
+          fill="url(#metalCap)"/>
+
+    <!-- Subtle inner squircle border -->
+    <rect x="85" y="85" width="854" height="854" rx="191" ry="191" fill="none" stroke="url(#rim)" stroke-width="6"/>
+  </g>
+</svg>

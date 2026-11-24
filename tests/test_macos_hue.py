@@ -412,23 +412,38 @@ class SwiftAppTests(unittest.TestCase):
         app = read("Sources", "MaprismaHueLights", "MaprismaHueLightsApp.swift")
         self.assertIn("MenuBarExtra", app)
         self.assertIn(".menuBarExtraStyle(.window)", app)
+        self.assertIn('Window("Maprisma Lights", id: "main-window")', app)
         self.assertIn('"lightbulb.fill" : "lightbulb"', app)
         content = read("Sources", "MaprismaHueLights", "ContentView.swift")
-        self.assertIn(".frame(width: 430, height: 600)", content)
+        self.assertIn(".frame(width: 440, height: 620)", content)
 
-    def test_supervisor_contract(self):
-        sup = read("Sources", "HueCore", "HelperSupervisor.swift")
-        self.assertIn('"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"', sup)
-        self.assertIn('URL(fileURLWithPath: "/usr/bin/env")', sup)
-        self.assertIn("restartDelay: TimeInterval = 5", sup)
+    def test_pure_swift_and_sandbox_contract(self):
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "Sources", "HueCore", "HelperSupervisor.swift")))
+        native = read("Sources", "HueCore", "NativeHueBridgeClient.swift")
+        self.assertIn("NWBrowser", native)
+        self.assertIn("SecTrustCopyCertificateChain", native)
+        self.assertIn("/eventstream/clip/v2", native)
+        demo = read("Sources", "HueCore", "DemoBridgeClient.swift")
+        self.assertIn("DemoBridgeClient", demo)
+        rules = read("Sources", "HueCore", "RuleEngine.swift")
+        self.assertIn("detectCycles", rules)
         loc = read("Sources", "HueCore", "ResourceLocator.swift")
-        self.assertIn('"scripts/hue-lights.py"', loc)
         self.assertIn('"translations/bundled.json"', loc)
-        cmds = read("Sources", "HueCore", "Commands.swift")
-        self.assertIn('"panel_open"', cmds)
-        self.assertIn('"panel_closed"', cmds)
         debounce = read("Sources", "HueCore", "BrightnessDebouncer.swift")
         self.assertIn("interval: TimeInterval = 0.15", debounce)
+        entitlements = read("MacAppStore", "MaprismaHueLights.entitlements")
+        self.assertIn("com.apple.security.app-sandbox", entitlements)
+        self.assertIn("com.apple.security.network.client", entitlements)
+        self.assertIn("com.apple.security.device.audio-input", entitlements)
+        privacy = read("MacAppStore", "PrivacyInfo.xcprivacy")
+        self.assertIn("NSPrivacyTracking", privacy)
+        self.assertIn("HueLightTheme", read("Sources", "HueCore", "LightThemes.swift"))
+        self.assertIn("HueStreamPacket", read("Sources", "HueCore", "EntertainmentStreamer.swift"))
+        self.assertIn("AudioAnalyzer", read("Sources", "HueCore", "AudioAnalyzer.swift"))
+        self.assertIn("AppSkin", read("Sources", "HueCore", "AppSkin.swift"))
+        self.assertIn("RegisterEventHotKey", read("Sources", "MaprismaHueLights", "GlobalHotKeyManager.swift"))
+        self.assertIn("AppShortcutsProvider", read("Sources", "MaprismaHueLights", "HueAppIntents.swift"))
+        self.assertIn("ScreenCaptureKit", read("Sources", "MaprismaHueLights", "AudioCaptureManager.swift"))
 
     def test_build_and_install_scripts(self):
         for name in ("build-mac.sh", "install-mac.sh"):
@@ -436,10 +451,12 @@ class SwiftAppTests(unittest.TestCase):
             subprocess.run(["bash", "-n", os.path.join(ROOT, name)], check=True)
         build = read("build-mac.sh")
         for needle in ("swift build -c release", 'dist/$APP_NAME.app', "Contents/MacOS",
-                       "Contents/Resources/scripts/hue-lights.py", "Contents/Resources/translations",
-                       "<key>LSUIElement</key>\n    <true/>", 'codesign --force --deep -s - "$APP"',
+                       "Contents/Resources/PrivacyInfo.xcprivacy", "Contents/Resources/translations",
+                       "ITSAppUsesNonExemptEncryption", "<key>LSUIElement</key>\n    <true/>",
+                       'codesign --force --deep -s - "$APP"',
                        "NSLocalNetworkUsageDescription", "_hue._tcp"):
             self.assertIn(needle, build)
+        self.assertNotIn("hue-lights.py", build)
         install = read("install-mac.sh")
         self.assertIn("./build-mac.sh", install)
         self.assertIn("$HOME/Applications", install)

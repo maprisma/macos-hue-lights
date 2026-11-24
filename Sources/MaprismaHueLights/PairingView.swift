@@ -1,8 +1,8 @@
 import HueCore
 import SwiftUI
 
-/// No bridge yet: bridges the helper found (mDNS, N-UPnP, subnet scan) with Pair, an IP field, and
-/// while pairing the push-link countdown.
+/// Bridge discovery (native Bonjour `_hue._tcp`), manual IP entry, push-link countdown,
+/// and interactive Demo Home entry for users without a bridge nearby (and App Store Review).
 struct PairingView: View {
     @EnvironmentObject var store: HueStore
 
@@ -10,7 +10,7 @@ struct PairingView: View {
         let s = store.snapshot
         VStack(alignment: .leading, spacing: 14) {
             Text(store.tr("Pair a Hue bridge"))
-                .font(.title3.weight(.semibold))
+                .font(store.scaledFont(16, weight: .semibold))
             if s.isPairing {
                 progress(s)
             } else {
@@ -21,7 +21,8 @@ struct PairingView: View {
     }
 
     private var card: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.primary.opacity(0.05))
+        RoundedRectangle(cornerRadius: store.cardRadius, style: .continuous)
+            .fill(Color.primary.opacity(0.05))
     }
 
     private func progress(_ s: HueSnapshot) -> some View {
@@ -31,6 +32,7 @@ struct PairingView: View {
                 .foregroundStyle(Color.accentColor)
             Text(store.trf("Press the round link button on top of the bridge now. Waiting {0} s for {1} …",
                            [String(s.pairRemaining), s.pairIP]))
+                .font(store.scaledFont(12.5))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             ProgressView(value: Double(min(35, max(0, s.pairRemaining))), total: 35)
@@ -45,9 +47,10 @@ struct PairingView: View {
     @ViewBuilder
     private func chooser(_ s: HueSnapshot) -> some View {
         Text(store.tr("Click Pair, then press the round link button on top of the bridge within 30 seconds."))
-            .font(.callout)
+            .font(store.scaledFont(12))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+
         if s.candidates.isEmpty {
             HStack(spacing: 8) {
                 if s.discovering {
@@ -55,12 +58,12 @@ struct PairingView: View {
                 }
                 Text(s.discovering ? store.tr("Searching the network for Hue bridges …")
                                    : store.tr("No bridge found automatically. Enter its IP address:"))
-                    .font(.callout)
+                    .font(store.scaledFont(12))
                     .fixedSize(horizontal: false, vertical: true)
             }
         } else {
             Text(store.tr("Found bridges").uppercased())
-                .font(.caption2.weight(.semibold))
+                .font(store.scaledFont(10, weight: .semibold))
                 .foregroundStyle(.secondary)
             VStack(spacing: 0) {
                 ForEach(s.candidates) { candidate in
@@ -69,10 +72,10 @@ struct PairingView: View {
                             .foregroundStyle(Color.accentColor)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(candidate.name)
-                                .font(.callout.weight(.medium))
+                                .font(store.scaledFont(12.5, weight: .medium))
                                 .lineLimit(1)
                             Text(candidate.ip)
-                                .font(.caption.monospacedDigit())
+                                .font(store.scaledFont(11).monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -87,8 +90,9 @@ struct PairingView: View {
             }
             .background(card)
             Text(store.tr("Or enter the bridge's IP address:"))
-                .font(.callout)
+                .font(store.scaledFont(12))
         }
+
         HStack(spacing: 8) {
             TextField(store.tr("Bridge IP, e.g. 192.168.178.106"), text: $store.manualIP)
                 .textFieldStyle(.roundedBorder)
@@ -96,11 +100,37 @@ struct PairingView: View {
             Button(store.tr("Pair")) { store.pair(store.manualIP) }
                 .disabled(cleanedIP(store.manualIP).isEmpty)
         }
+
         Button {
             store.discover()
         } label: {
             Label(store.tr("Search again"), systemImage: "arrow.clockwise")
         }
         .disabled(s.discovering)
+
+        Divider()
+            .padding(.vertical, 4)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(Color.accentColor)
+                Text(store.tr("Interactive preview"))
+                    .font(store.scaledFont(12.5, weight: .semibold))
+            }
+            Text(store.tr("No Philips Hue bridge nearby? Explore rooms, colors, schedules, and linked-light rules with a simulated smart home."))
+                .font(store.scaledFont(11.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                store.enterDemoMode()
+            } label: {
+                Label(store.tr("Try Demo Home"), systemImage: "house.fill")
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(card)
     }
 }

@@ -1,8 +1,7 @@
 import Foundation
 
-/// The helper's stdin commands, one JSON object per line (see `Hue.handle` in hue-lights.py).
-public enum HueCommand: Equatable {
-    /// Popover shown / hidden: the helper polls every 2 s while open, every 20 s while closed.
+/// Structured Hue control commands and input helpers.
+public enum HueCommand: Equatable, Sendable {
     case panelOpen
     case panelClosed
     case refresh
@@ -31,7 +30,6 @@ public enum HueCommand: Equatable {
         }
     }
 
-    /// The line written to the helper's stdin (no trailing newline), keys sorted.
     public var line: String {
         guard let data = try? JSONSerialization.data(withJSONObject: json, options: [.sortedKeys]),
               let text = String(data: data, encoding: .utf8) else { return "{}" }
@@ -46,7 +44,7 @@ public enum HueCommand: Equatable {
     }
 
     /// A whole room / zone: one grouped-light command when the bridge has a group for it, else
-    /// one command per light ("Other lights"), as the Linux panels do.
+    /// one command per light ("Other lights").
     public static func room(_ room: HueRoom, on: Bool? = nil, bri: Int? = nil) -> [HueCommand] {
         if !room.groupedLight.isEmpty {
             return [.group(id: room.groupedLight, on: on, bri: bri)]
@@ -55,13 +53,13 @@ public enum HueCommand: Equatable {
     }
 }
 
-/// Brightness 1...100 % in steps of 5 (1 at the bottom), like the Linux sliders.
+/// Brightness 1...100 % in steps of 5 (1 at the bottom).
 public func brightnessStep(_ value: Double) -> Int {
     guard value.isFinite else { return 1 }
     return Int(min(100, max(1, (value / 5).rounded() * 5)))
 }
 
-/// Bridge IP the user typed: trimmed and at most 64 characters (the helper validates it).
+/// Bridge IP the user typed: trimmed and at most 64 characters.
 public func cleanedIP(_ text: String) -> String {
     String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64))
 }

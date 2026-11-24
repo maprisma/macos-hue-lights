@@ -1,9 +1,7 @@
 import Foundation
 
-/// Where the helper script and the translation catalogs are: inside the .app
-/// (Contents/Resources/scripts, Contents/Resources/translations), or - in dev mode, e.g. `swift run`
-/// from the checkout - ./scripts and ./translations of the working directory or of a folder
-/// above the executable (.build/<config>/MaprismaHueLights → the repository root).
+/// Locates bundled app resources (such as `translations/bundled.json`) inside the `.app` bundle
+/// or, during development (`swift run` / `swift test`), relative to the working directory or executable.
 public struct ResourceLocator {
     public let resourceURL: URL?
     public let executableURL: URL?
@@ -18,14 +16,6 @@ public struct ResourceLocator {
         self.executableURL = executableURL
         self.currentDirectory = currentDirectory
         self.environment = environment
-    }
-
-    public var helperScript: URL? {
-        var extra: [URL] = []
-        if let dir = environment["HUE_LIGHTS_SCRIPTS"], !dir.isEmpty {
-            extra.append(URL(fileURLWithPath: dir).appendingPathComponent("hue-lights.py"))
-        }
-        return find(extra: extra, relative: "scripts/hue-lights.py")
     }
 
     public var translations: URL? {
