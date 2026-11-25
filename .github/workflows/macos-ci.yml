@@ -51,7 +51,7 @@ jobs:
           plutil -lint "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")" = "com.maprisma.lights"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$PLIST")" = "Maprisma Lights"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$PLIST")" = "true"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$PLIST")" = "false"
           test "$(/usr/libexec/PlistBuddy -c 'Print :ITSAppUsesNonExemptEncryption' "$PLIST")" = "false"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")" = "MaprismaHueLights"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")" = "13.0"
@@ -72,7 +72,7 @@ jobs:
           "$APP/Contents/MacOS/MaprismaHueLights" &
           PID=$!
           sleep 5
-          kill -0 "$PID"          # still running (menu bar app, no window needed)
+          kill -0 "$PID"          # still running (main window + menu bar toggle)
           kill -TERM "$PID"
           sleep 2
           ! kill -0 "$PID" 2>/dev/null

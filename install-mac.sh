@@ -43,30 +43,26 @@ echo "==> Installing to $TARGET"
 rm -rf "$TARGET"
 ditto "dist/$APP_NAME.app" "$TARGET"
 
-PY_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-if PATH="$PY_PATH" /usr/bin/env python3 -c 'import ssl, sys; assert sys.version_info >= (3, 8)' >/dev/null 2>&1; then
-    PY_VERSION="$(PATH="$PY_PATH" /usr/bin/env python3 -c 'import sys; print(sys.version.split()[0])')"
-    echo "    python3 $PY_VERSION found (the bridge helper needs no pip packages)"
-else
-    echo "    WARNING: no working python3 found. Install the Command Line Tools (xcode-select --install)"
-    echo "             or Homebrew python (brew install python), then start the app again."
-fi
-
 cat <<EOF
 
 Installed: $TARGET
 
 Launch it:
     open "$TARGET"
-  or find "$APP_NAME" in Spotlight / Launchpad. The bulb appears in the menu bar (no Dock icon).
+  or find "$APP_NAME" in Spotlight / Launchpad.
+  Opens a movable, resizable main window with a quick-toggle bulb icon in the menu bar.
 
 First start:
   * Allow "Local Network" access when macOS asks (System Settings > Privacy & Security >
-    Local Network), so the app can find and reach the Hue bridge.
-  * Click the bulb, pick your bridge (or type its IP), press the bridge's round link button.
+    Local Network), so the app can discover and control your Philips Hue Bridge and local
+    smart lights (Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, IKEA DIRIGERA).
+  * Pair a Hue Bridge, add another local lighting provider, or try the built-in Demo Home.
+
+Prebuilt releases:
+  https://github.com/maprisma/macos-hue-lights/releases/latest (Maprisma-Lights-macOS.zip)
 
 Start at login: System Settings > General > Login Items > "+" > $APP_NAME.
-Uninstall: quit it from Settings > Quit, delete "$TARGET" and ~/.config/hue-lights.
+Uninstall: quit the app (Cmd+Q or menu bar right-click > Quit), delete "$TARGET", and optionally remove ~/Library/Application Support/MaprismaLights.
 EOF
 
 if [ "$OPEN_AFTER" = "1" ]; then
