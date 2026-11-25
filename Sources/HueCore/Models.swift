@@ -9,12 +9,12 @@ import CoreFoundation
 public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
     public let id: String
     public var deviceID: String = ""
-    public let name: String
-    public let on: Bool
-    public let bri: Double
+    public var name: String
+    public var on: Bool
+    public var bri: Double
     public let dimmable: Bool
-    public let color: String
-    public let reachable: Bool
+    public var color: String
+    public var reachable: Bool
     public let supportsColor: Bool
     public let supportsCT: Bool
     public let mirek: Int?
@@ -119,15 +119,15 @@ public struct HueRoom: Identifiable, Equatable, Hashable, Sendable {
     public let id: String
     public let hueID: String
     public let kind: String
-    public let name: String
+    public var name: String
     public let groupedLight: String
-    public let on: Bool
-    public let bri: Double
-    public let onCount: Int
+    public var on: Bool
+    public var bri: Double
+    public var onCount: Int
     public let archetype: String
-    public let color: String
-    public let lights: [HueLight]
-    public let scenes: [HueScene]
+    public var color: String
+    public var lights: [HueLight]
+    public var scenes: [HueScene]
     public var provider: String = "hue"
 
     public init(

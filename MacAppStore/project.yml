@@ -17,6 +17,8 @@ targets:
     sources:
       - path: ../Sources/MaprismaHueLights
       - path: Assets.xcassets
+      - path: MaprismaHueLights.storekit
+        buildPhase: none
       - path: PrivacyInfo.xcprivacy
         buildPhase: resources
       - path: ../translations
@@ -29,6 +31,8 @@ targets:
       base:
         PRODUCT_NAME: "Maprisma Lights"
         PRODUCT_BUNDLE_IDENTIFIER: com.maprisma.lights
+        DEVELOPMENT_TEAM: NTSV3ZSSAK
+        CODE_SIGN_STYLE: Automatic
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -36,6 +40,8 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         SWIFT_VERSION: "5.9"
         COMBINE_HIDPI_IMAGES: YES
+    scheme:
+      storeKitConfiguration: MaprismaHueLights.storekit
     info:
       path: Info-MAS.plist
       properties:

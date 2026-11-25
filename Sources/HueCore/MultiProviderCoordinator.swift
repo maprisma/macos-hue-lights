@@ -1045,7 +1045,8 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
         ruleEngine.paused = paused
         // Only pass pure-Hue rules to hueClient so desktop/cross-brand rules are never double-evaluated or double-logged
         let hueOnly = rules.filter { rule in
-            HueColorMath.providerPrefix(of: rule.targetID) == "hue"
+            !rule.targets.isEmpty
+                && rule.targets.allSatisfy { HueColorMath.providerPrefix(of: $0.id) == "hue" }
                 && (rule.triggerKind == "desktop" || HueColorMath.providerPrefix(of: rule.triggerID) == "hue")
         }
         hueClient.setRules(hueOnly, paused: paused)
@@ -1056,7 +1057,9 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
             hueClient.triggerDesktopEvent(event)
         }
         let snap = buildMergedSnapshot()
-        let nonHueRules = ruleEngine.rules.filter { HueColorMath.providerPrefix(of: $0.targetID) != "hue" }
+        let nonHueRules = ruleEngine.rules.filter { rule in
+            rule.targets.contains { HueColorMath.providerPrefix(of: $0.id) != "hue" }
+        }
         guard !nonHueRules.isEmpty else { return }
         let savedRules = ruleEngine.rules
         ruleEngine.rules = nonHueRules

@@ -4,3 +4,4 @@ __pycache__/
 dist/
 .swiftpm/
 *.xcodeproj/
+MacAppStore/Info-MAS.plist

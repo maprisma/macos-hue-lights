@@ -341,7 +341,7 @@ struct AddProviderSheet: View {
                                         statusMessage = store.tr("Certificate trusted — reconnecting.")
                                     case .failure(let err):
                                         statusIsError = true
-                                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
+                                        statusMessage = store.tr(MultiProviderBridgeClient.friendlyErrorMessage(for: err))
                                     }
                                 } label: {
                                     Label(store.tr("Trust new certificate"), systemImage: "checkmark.shield")
@@ -410,7 +410,7 @@ struct AddProviderSheet: View {
                         dismiss()
                     case .failure(let err):
                         statusIsError = true
-                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
+                        statusMessage = store.tr(MultiProviderBridgeClient.friendlyErrorMessage(for: err))
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -511,7 +511,7 @@ struct AddProviderSheet: View {
                     statusMessage = store.trf("Connected: {0}", [summary])
                 case .failure(let err):
                     statusIsError = true
-                    statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
+                    statusMessage = store.tr(MultiProviderBridgeClient.friendlyErrorMessage(for: err))
                 }
             }
         }
@@ -538,7 +538,7 @@ struct AddProviderSheet: View {
                         statusMessage = store.tr("Paired successfully! Click Save Device to connect.")
                     case .failure(let err):
                         statusIsError = true
-                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
+                        statusMessage = store.tr(MultiProviderBridgeClient.friendlyErrorMessage(for: err))
                     }
                 }
             } else {
@@ -553,7 +553,7 @@ struct AddProviderSheet: View {
                         statusMessage = store.tr("Paired successfully! Click Save Device to connect.")
                     case .failure(let err):
                         statusIsError = true
-                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
+                        statusMessage = store.tr(MultiProviderBridgeClient.friendlyErrorMessage(for: err))
                     }
                 }
             }

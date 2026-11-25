@@ -144,7 +144,7 @@ public enum HueJSONValue: Equatable, Hashable, Codable, Sendable {
     public static func encodeCompactString(_ value: HueJSONValue) -> String {
         let obj = value.toFoundation()
         guard JSONSerialization.isValidJSONObject(obj),
-              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
+              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes]),
               let str = String(data: data, encoding: .utf8) else {
             return "{}"
         }
@@ -154,7 +154,7 @@ public enum HueJSONValue: Equatable, Hashable, Codable, Sendable {
     public static func encodePrettyString(_ value: HueJSONValue) -> String {
         let obj = value.toFoundation()
         guard JSONSerialization.isValidJSONObject(obj),
-              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
+              let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]),
               let str = String(data: data, encoding: .utf8) else {
             return "{}"
         }

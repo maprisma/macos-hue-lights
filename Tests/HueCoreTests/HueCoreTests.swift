@@ -806,7 +806,8 @@ final class FloorplanTests: XCTestCase {
                 HueRoom(hueID: officeID, kind: "room", name: "Office", groupedLight: "20000000-0000-0000-0000-000000000002", on: true, bri: 60, onCount: 1, archetype: "office", color: "#38bdf8", lights: [l2], scenes: []),
             ],
             lightCount: 2,
-            onCount: 2
+            onCount: 2,
+            hueBridgePaired: true
         )
 
         let livingBox = FloorplanBox(id: "b1", kind: "room", hueID: livingID, name: "Living Room", archetype: "living_room", x: 0, y: 0, width: 400, height: 200, entertainmentAreaID: entAreaID)
@@ -1296,7 +1297,8 @@ final class AskAIAndMCPTests: XCTestCase {
         let server = HueMCPServer(backend: backend)
 
         // 1. initialize
-        let initReply = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#))
+        let rawInitReply = await server.handleRequestLine(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)
+        let initReply = try XCTUnwrap(rawInitReply)
         XCTAssertTrue(initReply.contains(HueMCPServer.protocolVersion))
         XCTAssertTrue(initReply.contains(HueMCPServer.serverName))
 
@@ -1305,11 +1307,13 @@ final class AskAIAndMCPTests: XCTestCase {
         XCTAssertNil(notifReply)
 
         // 3. ping
-        let pingReply = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#))
+        let rawPingReply = await server.handleRequestLine(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#)
+        let pingReply = try XCTUnwrap(rawPingReply)
         XCTAssertTrue(pingReply.contains(#""result":{}"#))
 
         // 4. tools/list contains all required tools
-        let listReply = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#))
+        let rawListReply = await server.handleRequestLine(#"{"jsonrpc":"2.0","id":3,"method":"tools/list"}"#)
+        let listReply = try XCTUnwrap(rawListReply)
         for requiredTool in [
             "hue_status", "hue_list_rooms", "hue_list_lights", "hue_list_sensors",
             "hue_list_themes", "hue_list_rules", "hue_list_schedules", "hue_get_floorplan",
@@ -1321,41 +1325,48 @@ final class AskAIAndMCPTests: XCTestCase {
         }
 
         // 5. tools/call: set light by name, recall scene, apply theme, toggle sensor & motion area, create/toggle/delete rule
-        let setLightReply = try XCTUnwrap(await server.handleRequestLine(
+        let rawSetLightReply = await server.handleRequestLine(
             #"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"hue_set_light","arguments":{"target":"Desk Lamp","on":true,"bri":55}}}"#
-        ))
+        )
+        let setLightReply = try XCTUnwrap(rawSetLightReply)
         XCTAssertTrue(setLightReply.contains(#""isError":false"#))
         XCTAssertEqual(Int((demo.currentSnapshot().light(DemoBridgeClient.deskLampID)?.bri ?? 0).rounded()), 55)
 
-        let allOffReply = try XCTUnwrap(await server.handleRequestLine(
+        let rawAllOffReply = await server.handleRequestLine(
             #"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"hue_all_off","arguments":{}}}"#
-        ))
+        )
+        let allOffReply = try XCTUnwrap(rawAllOffReply)
         XCTAssertTrue(allOffReply.contains(#""isError":false"#))
         XCTAssertEqual(demo.currentSnapshot().onCount, 0)
 
-        let createRuleReply = try XCTUnwrap(await server.handleRequestLine(
+        let rawCreateRuleReply = await server.handleRequestLine(
             #"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"hue_create_rule","arguments":{"name":"MCP Motion Rule","trigger_kind":"motion","trigger":"Hallway Motion","target_kind":"room","target":"Hallway","action":"on"}}}"#
-        ))
+        )
+        let createRuleReply = try XCTUnwrap(rawCreateRuleReply)
         XCTAssertTrue(createRuleReply.contains("MCP Motion Rule"))
         let createdRule = try XCTUnwrap(backend.currentRules.first { $0.name == "MCP Motion Rule" })
 
-        let toggleReply = try XCTUnwrap(await server.handleRequestLine(
+        let rawToggleReply = await server.handleRequestLine(
             #"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"hue_toggle_rule","arguments":{"rule":"MCP Motion Rule","enabled":false}}}"#
-        ))
+        )
+        let toggleReply = try XCTUnwrap(rawToggleReply)
         XCTAssertTrue(toggleReply.contains(#""isError":false"#))
         XCTAssertEqual(backend.currentRules.first { $0.id == createdRule.id }?.enabled, false)
 
-        let deleteReply = try XCTUnwrap(await server.handleRequestLine(
+        let rawDeleteReply = await server.handleRequestLine(
             #"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"hue_delete_rule","arguments":{"rule":"MCP Motion Rule"}}}"#
-        ))
+        )
+        let deleteReply = try XCTUnwrap(rawDeleteReply)
         XCTAssertTrue(deleteReply.contains(#""isError":false"#))
         XCTAssertNil(backend.currentRules.first { $0.id == createdRule.id })
 
         // 6. resources/list & resources/read (hue://state) — verify no credential keys ever leak
-        let resList = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":9,"method":"resources/list"}"#))
+        let rawResList = await server.handleRequestLine(#"{"jsonrpc":"2.0","id":9,"method":"resources/list"}"#)
+        let resList = try XCTUnwrap(rawResList)
         XCTAssertTrue(resList.contains("hue://state"))
 
-        let resRead = try XCTUnwrap(await server.handleRequestLine(#"{"jsonrpc":"2.0","id":10,"method":"resources/read","params":{"uri":"hue://state"}}"#))
+        let rawResRead = await server.handleRequestLine(#"{"jsonrpc":"2.0","id":10,"method":"resources/read","params":{"uri":"hue://state"}}"#)
+        let resRead = try XCTUnwrap(rawResRead)
         XCTAssertTrue(resRead.contains("Living Room"))
         for secretKey in ["app_key", "appKey", "client_key", "clientKey", "fingerprint"] {
             XCTAssertFalse(resRead.contains(secretKey), "MCP hue://state must never expose \(secretKey)")
@@ -1658,14 +1669,14 @@ final class MultiProviderTests: XCTestCase {
             hueID: hueRoomID, kind: "room", name: "Living",
             groupedLight: "", on: true, bri: 80, onCount: 1, archetype: "living_room",
             color: "#ffd27a",
-            lights: [HueLight(id: hueLightID, name: "Floor Lamp", on: true, bri: 80, color: "#ffd27a")],
+            lights: [HueLight(id: hueLightID, name: "Floor Lamp", on: true, bri: 80, dimmable: true, color: "#ffd27a")],
             scenes: [], provider: "hue"
         )
         let wizRoom = HueRoom(
             hueID: "wiz:w1:room", kind: "room", name: "Desk",
             groupedLight: "", on: true, bri: 90, onCount: 1, archetype: "wiz",
             color: "#ffffff",
-            lights: [HueLight(id: "wiz:w1:light", name: "WiZ Desk", on: true, bri: 90, color: "#ffffff", provider: "wiz")],
+            lights: [HueLight(id: "wiz:w1:light", name: "WiZ Desk", on: true, bri: 90, dimmable: true, color: "#ffffff", provider: "wiz")],
             scenes: [], provider: "wiz"
         )
         let fp = FloorplanDocument(

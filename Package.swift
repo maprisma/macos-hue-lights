@@ -8,7 +8,9 @@ var targets: [Target] = [
     .target(name: "HueCore", path: "Sources/HueCore"),
     .testTarget(name: "HueCoreTests", dependencies: ["HueCore"], path: "Tests/HueCoreTests"),
 ]
-var products: [Product] = []
+var products: [Product] = [
+    .library(name: "HueCore", targets: ["HueCore"]),
+]
 
 #if os(macOS)
 // The SwiftUI menu bar & window app itself (AppKit/SwiftUI/ServiceManagement exist only on macOS).

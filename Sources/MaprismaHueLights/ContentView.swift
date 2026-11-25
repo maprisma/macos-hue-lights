@@ -569,6 +569,8 @@ struct WindowObserver: NSViewRepresentable {
                 target = NSAppearance(named: .aqua)
             case nil:
                 target = nil
+            @unknown default:
+                target = nil
             }
             if window.appearance != target {
                 window.appearance = target

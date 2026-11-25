@@ -825,7 +825,7 @@ public enum WLEDParser {
         var payload: [String: Any] = [:]
         if let on = on { payload["on"] = on }
         if let bri = bri {
-            let scaled = Int((Double(HueColorMath.clamp(bri, 1, 100)) * 2.55).rounded())
+            let scaled = Int((Double(HueColorMath.clamp(bri, 1, 100)) * 255.0 / 100.0).rounded())
             payload["bri"] = HueColorMath.clamp(scaled, 1, 255)
         }
         var seg0: [String: Any] = [:]

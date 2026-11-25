@@ -45,10 +45,10 @@ public final class ProStoreManager: ObservableObject {
 
     private var updatesTask: Task<Void, Never>?
     private var started: Bool = false
-    private let tr: (String) -> String
+    private let tr: @MainActor (String) -> String
 
-    public init(translator: @escaping (String) -> String = { HueStore.shared.tr($0) }) {
-        self.tr = translator
+    public init(translator: (@MainActor (String) -> String)? = nil) {
+        self.tr = translator ?? { HueStore.shared.tr($0) }
     }
 
     deinit {
