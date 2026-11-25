@@ -919,6 +919,59 @@ final class FloorplanTests: XCTestCase {
         XCTAssertEqual(LampIcon.inferred(for: "Bedside Left"), .table)
     }
 
+    func testFloorplanV2PolygonsMultiFloorAndLightingPlanner() throws {
+        // 1. L-shape polygon room: ray-casting containment excludes the cut-out notch!
+        let lBox = FloorplanBox(
+            id: "l-room",
+            kind: "room",
+            name: "Living L",
+            archetype: "living_room",
+            x: 0, y: 0, width: 400, height: 400
+        ).applyingShape(.lShape)
+        XCTAssertTrue(lBox.isPolygon)
+        XCTAssertEqual(lBox.effectivePoints.count, 6)
+        XCTAssertTrue(lBox.contains(x: 100, y: 100))   // inside upper-left arm
+        XCTAssertTrue(lBox.contains(x: 100, y: 350))   // inside bottom-left leg
+        XCTAssertFalse(lBox.contains(x: 350, y: 350))  // inside L-notch cut-out!
+        XCTAssertLessThan(lBox.area, 400.0 * 400.0)
+        XCTAssertGreaterThan(lBox.areaSquareMeters(pxPerMeter: 50.0), 30.0)
+
+        // Vertex insert, move, remove, and translation
+        let splitBox = lBox.insertingVertex(afterEdge: 0, at: FloorplanPoint(x: 200, y: -20))
+        XCTAssertEqual(splitBox.effectivePoints.count, 7)
+        XCTAssertEqual(splitBox.minY, -20, accuracy: 0.01)
+        let trimmedBox = splitBox.removingVertex(at: 1)
+        XCTAssertEqual(trimmedBox.effectivePoints.count, 6)
+        let movedBox = lBox.translated(dx: 50, dy: 25)
+        XCTAssertEqual(movedBox.x, 50, accuracy: 0.01)
+        XCTAssertTrue(movedBox.contains(x: 150, y: 125))
+
+        // 2. Multi-floor 2-Story Family House + sample planned lighting & RoomLightingAnalysis
+        let snap = HueSnapshot(phase: "ok")
+        var house = FloorplanTemplate.build(template: .familyHouse, snapshot: snap)
+        XCTAssertEqual(house.floors.count, 2)
+        XCTAssertFalse(house.boxes(onFloor: "eg").isEmpty)
+        XCTAssertFalse(house.boxes(onFloor: "og").isEmpty)
+        house.plannedLights = FloorplanTemplate.samplePlannedLights(for: house)
+        XCTAssertFalse(house.plannedLights.isEmpty)
+        let living = try XCTUnwrap(house.boxes(onFloor: "eg").first(where: { $0.archetype == "living_room" }))
+        let analysis = RoomLightingAnalysis.compute(for: living, floorplan: house, snapshot: snap, includePlanned: true)
+        XCTAssertGreaterThan(analysis.plannedLumens, 0)
+        XCTAssertGreaterThan(analysis.lux, 0)
+
+        // 3. Round-trip v2 JSON + backward-compatible v1 JSON decode
+        let encoded = try JSONEncoder().encode(house)
+        let decoded = try JSONDecoder().decode(FloorplanDocument.self, from: encoded)
+        XCTAssertEqual(decoded.floors.count, 2)
+        XCTAssertEqual(decoded.plannedLights.count, house.plannedLights.count)
+
+        let legacyV1 = Data(#"{"version":1,"bridge_id":"abc","boxes":[{"id":"r1","kind":"room","name":"Old","x":0,"y":0,"w":200,"h":200}],"lamps":{"l1":{"x":50,"y":50,"z":0}}}"#.utf8)
+        let decodedV1 = try JSONDecoder().decode(FloorplanDocument.self, from: legacyV1)
+        XCTAssertEqual(decodedV1.floors.count, 1)
+        XCTAssertEqual(decodedV1.boxes.first?.floorID, "eg")
+        XCTAssertEqual(decodedV1.lamps["l1"]?.floorID, "eg")
+    }
+
     @MainActor
     func testDemoBridgeClientTwoWayMutations() async throws {
         let demo = DemoBridgeClient()
@@ -1372,5 +1425,228 @@ final class ProAccessPolicyTests: XCTestCase {
         XCTAssertTrue(store.lastVerifiedPro())
         try store.setLastVerifiedPro(false)
         XCTAssertFalse(store.lastVerifiedPro())
+    }
+}
+
+final class MultiProviderTests: XCTestCase {
+    func testResourceIDAndLocalHostValidation() {
+        XCTAssertTrue(HueColorMath.validResourceID("11111111-1111-1111-1111-111111111111"))
+        XCTAssertTrue(HueColorMath.validResourceID("wled:abc123:0"))
+        XCTAssertTrue(HueColorMath.validResourceID("ha:main:light.kitchen_ceiling"))
+        XCTAssertTrue(HueColorMath.validResourceID("dirigera:hub1:room:r-01"))
+        XCTAssertFalse(HueColorMath.validResourceID("../etc/passwd"))
+        XCTAssertFalse(HueColorMath.validResourceID("ha:main:../escape"))
+        XCTAssertEqual(HueColorMath.providerPrefix(of: "11111111-1111-1111-1111-111111111111"), "hue")
+        XCTAssertEqual(HueColorMath.providerPrefix(of: "wled:abc:0"), "wled")
+        XCTAssertEqual(HueColorMath.providerPrefix(of: "ha:main:light.desk"), "ha")
+
+        XCTAssertTrue(HueColorMath.validLocalHost("192.168.178.42"))
+        XCTAssertTrue(HueColorMath.validLocalHost("10.0.0.5"))
+        XCTAssertTrue(HueColorMath.validLocalHost("wled-desk.local"))
+        XCTAssertFalse(HueColorMath.validLocalHost("8.8.8.8"))
+        XCTAssertFalse(HueColorMath.validLocalHost("example.com"))
+        XCTAssertFalse(HueColorMath.validLocalHost("127.0.0.1", allowLoopback: false))
+        XCTAssertTrue(HueColorMath.validLocalHost("127.0.0.1", allowLoopback: true))
+        XCTAssertTrue(HueColorMath.validLocalHost("localhost", allowLoopback: true))
+    }
+
+    func testRGBAndHSBColorRoundTrip() {
+        let hsb = HueColorMath.rgbToHSB(r: 255, g: 128, b: 0)
+        XCTAssertEqual(hsb.hue, 30.1, accuracy: 0.5)
+        XCTAssertEqual(hsb.sat, 100.0, accuracy: 0.5)
+        XCTAssertEqual(HueColorMath.hsbToHex(hue: 0, sat: 100, bri: 100), "#ff0000")
+        XCTAssertEqual(HueColorMath.hsbToHex(hue: 120, sat: 100, bri: 100), "#00ff00")
+        XCTAssertEqual(HueColorMath.hsbToHex(hue: 240, sat: 100, bri: 100), "#0000ff")
+    }
+
+    func testHomeAssistantParserLightsScenesAndSensors() {
+        let conn = ProviderConnection(id: "ha1", kind: .homeAssistant, name: "Home Assistant", host: "192.168.1.10")
+        let states: [[String: Any]] = [
+            [
+                "entity_id": "light.kitchen_strip",
+                "state": "on",
+                "attributes": [
+                    "friendly_name": "Kitchen Strip",
+                    "brightness": 204,
+                    "rgb_color": [255, 100, 50],
+                    "supported_color_modes": ["rgb", "color_temp"],
+                    "effect_list": ["Rainbow", "Pulse"],
+                    "effect": "Rainbow",
+                ],
+            ],
+            [
+                "entity_id": "scene.movie_night",
+                "state": "scening",
+                "attributes": ["friendly_name": "Movie Night"],
+            ],
+            [
+                "entity_id": "binary_sensor.hall_motion",
+                "state": "on",
+                "attributes": ["friendly_name": "Hall Motion", "device_class": "motion"],
+            ],
+        ]
+        let result = HomeAssistantParser.parseStates(connection: conn, states: states, entityAreas: ["light.kitchen_strip": "Kitchen"])
+        XCTAssertEqual(result.lightCount, 1)
+        XCTAssertEqual(result.onCount, 1)
+        XCTAssertEqual(result.rooms.first?.name, "Kitchen")
+        XCTAssertEqual(result.rooms.first?.provider, "home_assistant")
+        XCTAssertEqual(result.rooms.first?.lights.first?.id, "ha:ha1:light.kitchen_strip")
+        XCTAssertEqual(result.rooms.first?.lights.first?.color, "#ff6432")
+        XCTAssertEqual(result.rooms.first?.scenes.first?.name, "Movie Night")
+        XCTAssertEqual(result.sensors.count, 1)
+        XCTAssertEqual(result.sensors.first?.kind, "motion")
+        XCTAssertTrue(result.sensors.first?.motion == true)
+    }
+
+    func testWLEDParserAndStatePayload() {
+        let conn = ProviderConnection(id: "w1", kind: .wled, name: "Desk Strip", host: "192.168.1.40", roomName: "Office")
+        let json: [String: Any] = [
+            "state": [
+                "on": true,
+                "bri": 128,
+                "ps": 2,
+                "seg": [["col": [[0, 200, 255]], "fx": 1]],
+            ],
+            "info": ["name": "Desk WLED", "mac": "aabbccddeeff"],
+            "effects": ["Solid", "Blink", "Rainbow"],
+        ]
+        let presets: [String: Any] = ["1": ["n": "Warm"], "2": ["n": "Cyberpunk"]]
+        let res = WLEDParser.parse(connection: conn, json: json, presets: presets)
+        XCTAssertEqual(res.lightCount, 1)
+        XCTAssertEqual(res.rooms.first?.name, "Office")
+        XCTAssertEqual(res.rooms.first?.lights.first?.color, "#00c8ff")
+        XCTAssertEqual(res.rooms.first?.lights.first?.effect, "Blink")
+        XCTAssertEqual(res.rooms.first?.scenes.count, 2)
+        XCTAssertTrue(res.rooms.first?.scenes.first(where: { $0.name == "Cyberpunk" })?.active == true)
+
+        let payload = WLEDParser.buildStatePayload(on: true, bri: 50, mirek: nil, xy: (0.64, 0.33), effect: "Rainbow", effectsList: ["Solid", "Blink", "Rainbow"])
+        XCTAssertEqual(payload["on"] as? Bool, true)
+        XCTAssertEqual(payload["bri"] as? Int, 128)
+    }
+
+    func testWiZCodecPilotAndSetPilot() throws {
+        let conn = ProviderConnection(id: "wiz1", kind: .wiz, name: "Floor Lamp", host: "192.168.1.41")
+        let res = WiZCodec.parsePilot(connection: conn, json: [
+            "result": ["state": true, "dimming": 70, "r": 255, "g": 170, "b": 40, "sceneId": 6, "mac": "112233445566"],
+        ])
+        XCTAssertEqual(res.lightCount, 1)
+        XCTAssertEqual(res.rooms.first?.lights.first?.color, "#ffaa28")
+        XCTAssertEqual(res.rooms.first?.lights.first?.bri, 70)
+        XCTAssertTrue(res.rooms.first?.scenes.contains(where: { $0.name == "Cozy" && $0.active }) == true)
+
+        let cmd = WiZCodec.encodeSetPilot(on: true, bri: 60, mirek: 300, xy: nil)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: cmd) as? [String: Any])
+        XCTAssertEqual(obj["method"] as? String, "setPilot")
+    }
+
+    func testLIFXBinaryPacketEncodeAndDecode() throws {
+        let getPkt = LIFXCodec.encodeGetColor()
+        XCTAssertEqual(getPkt.count, 36)
+        let powerPkt = LIFXCodec.encodeSetPower(on: true, durationMs: 300)
+        XCTAssertEqual(powerPkt.count, 42)
+
+        // Construct a synthetic LightState (type 107) reply packet (36 + 52 = 88 bytes)
+        var reply = Data(count: 88)
+        reply[32] = UInt8(LIFXCodec.msgLightState & 0xFF)
+        reply[33] = UInt8(LIFXCodec.msgLightState >> 8)
+        // hue=0, sat=65535, bri=32768 (~50%), kelvin=3500, power=65535
+        reply[38] = 0xFF; reply[39] = 0xFF
+        reply[40] = 0x00; reply[41] = 0x80
+        reply[42] = UInt8(3500 & 0xFF); reply[43] = UInt8(3500 >> 8)
+        reply[46] = 0xFF; reply[47] = 0xFF
+        let labelData = Data("Studio Bulb".utf8)
+        reply.replaceSubrange(48..<(48 + labelData.count), with: labelData)
+
+        let decoded = try XCTUnwrap(LIFXCodec.decodeLightState(reply))
+        XCTAssertTrue(decoded.powerOn)
+        XCTAssertEqual(decoded.kelvin, 3500)
+        XCTAssertEqual(decoded.label, "Studio Bulb")
+        XCTAssertEqual(decoded.brightness, 50.0, accuracy: 0.5)
+    }
+
+    func testGoveeNanoleafShellyAndDirigeraParsers() {
+        let goveeConn = ProviderConnection(id: "g1", kind: .govee, name: "TV Backlight", host: "192.168.1.42")
+        let goveeRes = GoveeCodec.parseStatus(connection: goveeConn, json: [
+            "msg": ["data": ["onOff": 1, "brightness": 85, "color": ["r": 120, "g": 40, "b": 255]]],
+        ])
+        XCTAssertEqual(goveeRes.rooms.first?.lights.first?.color, "#7828ff")
+        XCTAssertEqual(GoveeCodec.encodeCommands(on: true, bri: 80, mirek: nil, xy: (0.15, 0.06)).count, 3)
+
+        let nanoConn = ProviderConnection(id: "n1", kind: .nanoleaf, name: "Wall Shapes", host: "192.168.1.43")
+        let (nanoRes, sceneMap) = NanoleafParser.parse(connection: nanoConn, json: [
+            "name": "Shapes",
+            "serialNo": "S123",
+            "state": [
+                "on": ["value": true],
+                "brightness": ["value": 75],
+                "hue": ["value": 180],
+                "sat": ["value": 80],
+                "ct": ["value": 3000],
+                "colorMode": "hs",
+            ],
+            "effects": ["select": "Northern Lights", "effectsList": ["Northern Lights", "Sunset"]],
+        ])
+        XCTAssertEqual(nanoRes.lightCount, 1)
+        XCTAssertEqual(nanoRes.rooms.first?.scenes.count, 2)
+        XCTAssertEqual(sceneMap.count, 2)
+
+        let shellyConn = ProviderConnection(id: "s1", kind: .shelly, name: "Hallway Dimmer", host: "192.168.1.44")
+        let (shellyRes, meta) = ShellyParser.parseGen2(
+            connection: shellyConn,
+            info: ["name": "Hall Dimmer", "mac": "AABBCC"],
+            status: ["light:0": ["output": true, "brightness": 64.0]]
+        )
+        XCTAssertEqual(shellyRes.lightCount, 1)
+        XCTAssertEqual(meta["shelly:s1:light:0"]?.gen, 2)
+
+        let dirConn = ProviderConnection(id: "d1", kind: .dirigera, name: "IKEA Hub", host: "192.168.1.45")
+        let dirRes = DirigeraParser.parse(
+            connection: dirConn,
+            devices: [
+                [
+                    "id": "dev-1",
+                    "type": "light",
+                    "isReachable": true,
+                    "room": ["id": "rm-1", "name": "Bedroom"],
+                    "attributes": ["customName": "TRÅDFRI Lamp", "isOn": true, "lightLevel": 45, "colorTemperature": 2700],
+                    "capabilities": ["canReceive": ["isOn", "lightLevel", "colorTemperature"]],
+                ],
+                [
+                    "id": "sen-1",
+                    "type": "sensor",
+                    "deviceType": "motionSensor",
+                    "isReachable": true,
+                    "room": ["id": "rm-1", "name": "Bedroom"],
+                    "attributes": ["customName": "VALLHORN", "isDetected": true, "batteryPercentage": 92],
+                ],
+            ],
+            scenes: [["id": "sc-1", "info": ["name": "Good Night"]]]
+        )
+        XCTAssertEqual(dirRes.lightCount, 1)
+        XCTAssertEqual(dirRes.rooms.first?.name, "Bedroom")
+        XCTAssertEqual(dirRes.rooms.first?.scenes.first?.name, "Good Night")
+        XCTAssertEqual(dirRes.sensors.count, 1)
+        XCTAssertTrue(dirRes.sensors.first?.motion == true)
+    }
+
+    func testSettingsStoreProvidersPersistenceAndSecrets() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hue-providers-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = SettingsStore(directory: dir)
+        let conns = [
+            ProviderConnection(id: "ha1", kind: .homeAssistant, name: "Home Assistant", host: "192.168.1.10"),
+            ProviderConnection(id: "wled1", kind: .wled, name: "Desk Strip", host: "192.168.1.40", roomName: "Office"),
+        ]
+        try store.saveProviders(conns)
+        let loaded = store.loadProviders()
+        XCTAssertEqual(loaded.count, 2)
+        XCTAssertEqual(loaded[0].kind, .homeAssistant)
+        XCTAssertEqual(loaded[1].roomName, "Office")
+
+        let secrets = InMemoryProviderSecretStore()
+        try secrets.saveSecret("top-secret-token", for: "ha1")
+        XCTAssertEqual(secrets.loadSecret(for: "ha1"), "top-secret-token")
+        try secrets.deleteSecret(for: "ha1")
+        XCTAssertNil(secrets.loadSecret(for: "ha1"))
     }
 }

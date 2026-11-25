@@ -111,7 +111,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSHumanReadableCopyright</key>
     <string>© 2026 Uwe Bruckhaus. All rights reserved.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Maprisma Lights finds your Philips Hue bridge on the local network and switches its lights. It talks only to the bridge.</string>
+    <string>Maprisma Lights finds your Philips Hue bridge and local smart lights (Home Assistant, WLED, WiZ, LIFX, Govee, Nanoleaf, Shelly, IKEA DIRIGERA) on your local network. It talks only to your local devices.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Optional: Maprisma Lights uses your microphone only when you start the Light Synthesizer in Microphone mode. Audio is analyzed in memory only and is never recorded or sent off your Mac.</string>
     <key>NSScreenCaptureUsageDescription</key>
@@ -119,6 +119,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>NSBonjourServices</key>
     <array>
         <string>_hue._tcp</string>
+        <string>_home-assistant._tcp</string>
+        <string>_wled._tcp</string>
+        <string>_nanoleafapi._tcp</string>
+        <string>_shelly._tcp</string>
+        <string>_ihsp._tcp</string>
     </array>
 </dict>
 </plist>

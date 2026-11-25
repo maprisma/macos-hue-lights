@@ -296,6 +296,7 @@ struct RoomCard: View {
                                 Text(store.l10n.roomName(room))
                                     .font(store.scaledFont(13, weight: .semibold))
                                     .lineLimit(1)
+                                ProviderBadge(providerRaw: room.provider)
                                 if isFav {
                                     Image(systemName: "star.fill")
                                         .font(.system(size: 9))

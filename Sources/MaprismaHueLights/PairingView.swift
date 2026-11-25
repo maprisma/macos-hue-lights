@@ -117,6 +117,53 @@ struct PairingView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(store.skinAccentColor)
+                Text(store.tr("Other smart lights & hubs"))
+                    .font(store.scaledFont(12.5, weight: .semibold))
+            }
+            Text(store.tr("Connect Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, or IKEA DIRIGERA directly over your local network — with or without a Hue Bridge."))
+                .font(store.scaledFont(11.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 6),
+                    GridItem(.flexible(), spacing: 6),
+                    GridItem(.flexible(), spacing: 6),
+                    GridItem(.flexible(), spacing: 6),
+                ],
+                spacing: 6
+            ) {
+                ForEach(LightProviderKind.extraProviders) { kind in
+                    Button {
+                        store.openAddProvider(kind: kind)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: kind.safeSFSymbol)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color(hex: kind.accentHex))
+                            Text(kind.shortBadge)
+                                .font(store.scaledFont(10.5, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(card)
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(store.skinAccentColor)
                 Text(store.tr("Interactive preview"))

@@ -24,6 +24,7 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
     public let availableEffects: [String]
     public var motionAware: Bool = false
     public var motionActive: Bool = false
+    public var provider: String = "hue"
 
     public init(
         id: String,
@@ -42,7 +43,8 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
         effect: String = "no_effect",
         availableEffects: [String] = [],
         motionAware: Bool = false,
-        motionActive: Bool = false
+        motionActive: Bool = false,
+        provider: String = "hue"
     ) {
         self.id = id
         self.deviceID = deviceID
@@ -61,6 +63,7 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
         self.availableEffects = availableEffects
         self.motionAware = motionAware
         self.motionActive = motionActive
+        self.provider = provider.isEmpty ? "hue" : provider
     }
 
     public init(json: [String: Any]) {
@@ -84,6 +87,8 @@ public struct HueLight: Identifiable, Equatable, Hashable, Sendable {
         availableEffects = JSONValue.strings(json, "available_effects")
         motionAware = JSONValue.bool(json, "motion_aware")
         motionActive = JSONValue.bool(json, "motion_active")
+        let prov = JSONValue.string(json, "provider")
+        provider = prov.isEmpty ? "hue" : prov
     }
 }
 
@@ -91,17 +96,21 @@ public struct HueScene: Identifiable, Equatable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let active: Bool
+    public var provider: String = "hue"
 
-    public init(id: String, name: String, active: Bool) {
+    public init(id: String, name: String, active: Bool, provider: String = "hue") {
         self.id = id
         self.name = name
         self.active = active
+        self.provider = provider.isEmpty ? "hue" : provider
     }
 
     public init(json: [String: Any]) {
         id = JSONValue.string(json, "id")
         name = JSONValue.string(json, "name")
         active = JSONValue.bool(json, "active")
+        let prov = JSONValue.string(json, "provider")
+        provider = prov.isEmpty ? "hue" : prov
     }
 }
 
@@ -119,6 +128,7 @@ public struct HueRoom: Identifiable, Equatable, Hashable, Sendable {
     public let color: String
     public let lights: [HueLight]
     public let scenes: [HueScene]
+    public var provider: String = "hue"
 
     public init(
         hueID: String,
@@ -131,7 +141,8 @@ public struct HueRoom: Identifiable, Equatable, Hashable, Sendable {
         archetype: String,
         color: String,
         lights: [HueLight],
-        scenes: [HueScene]
+        scenes: [HueScene],
+        provider: String = "hue"
     ) {
         self.hueID = hueID
         self.kind = kind
@@ -145,6 +156,7 @@ public struct HueRoom: Identifiable, Equatable, Hashable, Sendable {
         self.color = color
         self.lights = lights
         self.scenes = scenes
+        self.provider = provider.isEmpty ? "hue" : provider
     }
 
     public init(json: [String: Any]) {
@@ -160,6 +172,8 @@ public struct HueRoom: Identifiable, Equatable, Hashable, Sendable {
         color = JSONValue.string(json, "color")
         lights = JSONValue.objects(json, "lights").map(HueLight.init(json:))
         scenes = JSONValue.objects(json, "scenes").map(HueScene.init(json:))
+        let prov = JSONValue.string(json, "provider")
+        provider = prov.isEmpty ? "hue" : prov
     }
 
     public var unreachableCount: Int { lights.filter { !$0.reachable }.count }
@@ -327,6 +341,7 @@ public struct HueSensor: Identifiable, Codable, Equatable, Hashable, Sendable {
     public var sensitivityMax: Int?
     public var buttonIDs: [String]
     public var lastEvent: String
+    public var provider: String = "hue"
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -339,6 +354,7 @@ public struct HueSensor: Identifiable, Codable, Equatable, Hashable, Sendable {
         case sensitivityMax = "sensitivity_max"
         case buttonIDs = "button_ids"
         case lastEvent = "last_event"
+        case provider
     }
 
     public init(
@@ -357,7 +373,8 @@ public struct HueSensor: Identifiable, Codable, Equatable, Hashable, Sendable {
         sensitivity: Int? = nil,
         sensitivityMax: Int? = nil,
         buttonIDs: [String] = [],
-        lastEvent: String = ""
+        lastEvent: String = "",
+        provider: String = "hue"
     ) {
         self.id = id
         self.deviceID = deviceID
@@ -375,6 +392,29 @@ public struct HueSensor: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.sensitivityMax = sensitivityMax
         self.buttonIDs = buttonIDs
         self.lastEvent = lastEvent
+        self.provider = provider.isEmpty ? "hue" : provider
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        deviceID = try c.decodeIfPresent(String.self, forKey: .deviceID) ?? ""
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        roomID = try c.decodeIfPresent(String.self, forKey: .roomID) ?? ""
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        motion = try c.decodeIfPresent(Bool.self, forKey: .motion) ?? false
+        open = try c.decodeIfPresent(Bool.self, forKey: .open) ?? false
+        temperature = try c.decodeIfPresent(Double.self, forKey: .temperature)
+        lux = try c.decodeIfPresent(Double.self, forKey: .lux)
+        battery = try c.decodeIfPresent(Int.self, forKey: .battery)
+        batteryState = try c.decodeIfPresent(String.self, forKey: .batteryState) ?? ""
+        sensitivity = try c.decodeIfPresent(Int.self, forKey: .sensitivity)
+        sensitivityMax = try c.decodeIfPresent(Int.self, forKey: .sensitivityMax)
+        buttonIDs = try c.decodeIfPresent([String].self, forKey: .buttonIDs) ?? []
+        lastEvent = try c.decodeIfPresent(String.self, forKey: .lastEvent) ?? ""
+        let prov = try c.decodeIfPresent(String.self, forKey: .provider) ?? "hue"
+        provider = prov.isEmpty ? "hue" : prov
     }
 
     public init(json: [String: Any]) {
@@ -394,6 +434,8 @@ public struct HueSensor: Identifiable, Codable, Equatable, Hashable, Sendable {
         sensitivityMax = JSONValue.optionalInt(json, "sensitivity_max")
         buttonIDs = JSONValue.strings(json, "button_ids")
         lastEvent = JSONValue.string(json, "last_event")
+        let prov = JSONValue.string(json, "provider")
+        provider = prov.isEmpty ? "hue" : prov
     }
 }
 
@@ -640,6 +682,8 @@ public struct HueSnapshot: Equatable, Sendable {
     public var entertainmentAreas: [HueEntertainmentArea]
     public var motionAreas: [HueMotionArea]
     public var sensors: [HueSensor]
+    public var providers: [ProviderStatus]
+    public var hueBridgePaired: Bool
     public var isDemo: Bool
 
     /// Before the first bridge state arrives: no bridge known yet, nothing on.
@@ -666,6 +710,8 @@ public struct HueSnapshot: Equatable, Sendable {
         entertainmentAreas: [HueEntertainmentArea] = [],
         motionAreas: [HueMotionArea] = [],
         sensors: [HueSensor] = [],
+        providers: [ProviderStatus] = [],
+        hueBridgePaired: Bool? = nil,
         isDemo: Bool = false
     ) {
         self.phase = phase.isEmpty ? "connecting" : phase
@@ -688,6 +734,8 @@ public struct HueSnapshot: Equatable, Sendable {
         self.entertainmentAreas = entertainmentAreas
         self.motionAreas = motionAreas
         self.sensors = sensors
+        self.providers = providers
+        self.hueBridgePaired = hueBridgePaired ?? (bridge != nil)
         self.isDemo = isDemo
     }
 
@@ -728,6 +776,8 @@ public struct HueSnapshot: Equatable, Sendable {
         entertainmentAreas = []
         motionAreas = JSONValue.objects(json, "motion_areas").map(HueMotionArea.init(json:))
         sensors = JSONValue.objects(json, "sensors").map(HueSensor.init(json:))
+        providers = JSONValue.objects(json, "providers").map(ProviderStatus.init(json:))
+        hueBridgePaired = (json["hue_paired"] as? Bool) ?? (bridge != nil)
         isDemo = JSONValue.bool(json, "is_demo")
     }
 
@@ -847,6 +897,54 @@ public enum HueColorMath {
         return true
     }
 
+    /// Accepts either a Hue UUID or a safe namespaced multi-provider resource ID (e.g. `wled:abc:0`, `ha:main:light.desk`).
+    public static func validResourceID(_ value: String?) -> Bool {
+        guard let s = value, !s.isEmpty, s.count <= 160 else { return false }
+        if validUUID(s) { return true }
+        guard let colonIdx = s.firstIndex(of: ":") else { return false }
+        let prefix = String(s[..<colonIdx])
+        let rest = String(s[s.index(after: colonIdx)...])
+        guard !prefix.isEmpty, prefix.count <= 16, !rest.isEmpty, !rest.contains("..") else { return false }
+        let prefixOK = prefix.utf8.allSatisfy { b in
+            (0x61...0x7A).contains(b) || (0x30...0x39).contains(b) || b == 0x5F
+        }
+        guard prefixOK else { return false }
+        return rest.utf8.allSatisfy { b in
+            (0x30...0x39).contains(b) ||
+            (0x41...0x5A).contains(b) ||
+            (0x61...0x7A).contains(b) ||
+            b == 0x2D || b == 0x5F || b == 0x2E || b == 0x3A || b == 0x2F || b == 0x40
+        }
+    }
+
+    /// Returns the provider prefix for a resource ID (`"hue"` for raw Hue UUIDs).
+    public static func providerPrefix(of id: String) -> String {
+        if validUUID(id) { return "hue" }
+        guard let colonIdx = id.firstIndex(of: ":") else { return "hue" }
+        let prefix = String(id[..<colonIdx]).lowercased()
+        return prefix.isEmpty ? "hue" : prefix
+    }
+
+    /// Validates a local LAN IPv4 address, `.local` mDNS hostname, or optional loopback (`localhost`/`127.0.0.1`).
+    public static func validLocalHost(_ value: String, allowLoopback: Bool = false) -> Bool {
+        let host = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !host.isEmpty, host.count <= 253 else { return false }
+        if validBridgeIP(host) { return true }
+        if allowLoopback && (host == "127.0.0.1" || host == "localhost" || host == "::1") {
+            return true
+        }
+        if host.hasSuffix(".local"), !host.hasPrefix("."), !host.contains("..") {
+            let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+            guard labels.count >= 2 else { return false }
+            return labels.allSatisfy { label in
+                !label.isEmpty && label.count <= 63 && label.utf8.allSatisfy { b in
+                    (0x61...0x7A).contains(b) || (0x30...0x39).contains(b) || b == 0x2D
+                }
+            }
+        }
+        return false
+    }
+
     public static func validBridgeID(_ value: String?) -> Bool {
         guard let s = value, s.count == 16 else { return false }
         return s.utf8.allSatisfy { b in
@@ -870,7 +968,11 @@ public enum HueColorMath {
         if a == 10 { return true }                              // 10.0.0.0/8
         if a == 172 && (16...31).contains(b) { return true }    // 172.16.0.0/12
         if a == 192 && b == 168 { return true }                 // 192.168.0.0/16
-        if a == 169 && b == 254 { return true }                 // 169.254.0.0/16 link-local
+        if a == 169 && b == 254 {
+            // Never allow cloud metadata endpoint 169.254.169.254
+            if octets[2] == 169 && octets[3] == 254 { return false }
+            return true                                         // 169.254.0.0/16 link-local
+        }
         return false
     }
 
@@ -976,6 +1078,69 @@ public enum HueColorMath {
         let g = Int((Double(gSum) / Double(count)).rounded())
         let b = Int((Double(bSum) / Double(count)).rounded())
         return String(format: "#%02x%02x%02x", clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255))
+    }
+
+    public static func hexToRGB(_ hex: String) -> (r: Int, g: Int, b: Int)? {
+        let chars = Array(hex.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard chars.count == 7, chars[0] == "#",
+              let v = UInt32(String(chars[1...]), radix: 16) else { return nil }
+        return (Int((v >> 16) & 0xFF), Int((v >> 8) & 0xFF), Int(v & 0xFF))
+    }
+
+    public static func rgbToHex(r: Int, g: Int, b: Int) -> String {
+        String(format: "#%02x%02x%02x", clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255))
+    }
+
+    public static func xyToRGB(x: Double, y: Double) -> (r: Int, g: Int, b: Int) {
+        hexToRGB(xyToHex(x: x, y: y)) ?? (255, 210, 122)
+    }
+
+    /// Converts sRGB 0..255 to HSB (hue: 0..360, sat: 0..100, bri: 0..100).
+    public static func rgbToHSB(r: Int, g: Int, b: Int) -> (hue: Double, sat: Double, bri: Double) {
+        let rf = Double(clamp(r, 0, 255)) / 255.0
+        let gf = Double(clamp(g, 0, 255)) / 255.0
+        let bf = Double(clamp(b, 0, 255)) / 255.0
+        let maxC = max(rf, max(gf, bf))
+        let minC = min(rf, min(gf, bf))
+        let delta = maxC - minC
+        var hue: Double = 0
+        if delta > 0.00001 {
+            if maxC == rf {
+                hue = 60.0 * (((gf - bf) / delta).truncatingRemainder(dividingBy: 6.0))
+            } else if maxC == gf {
+                hue = 60.0 * (((bf - rf) / delta) + 2.0)
+            } else {
+                hue = 60.0 * (((rf - gf) / delta) + 4.0)
+            }
+            if hue < 0 { hue += 360.0 }
+        }
+        let sat = maxC > 0 ? (delta / maxC) * 100.0 : 0.0
+        let bri = maxC * 100.0
+        return (hue, sat, bri)
+    }
+
+    /// Converts HSB (hue: 0..360, sat: 0..100, bri: 0..100) to "#rrggbb".
+    public static func hsbToHex(hue: Double, sat: Double, bri: Double = 100.0) -> String {
+        let h = ((hue.isFinite ? hue : 0).truncatingRemainder(dividingBy: 360.0) + 360.0).truncatingRemainder(dividingBy: 360.0)
+        let s = clamp(sat.isFinite ? sat : 0, 0.0, 100.0) / 100.0
+        let v = clamp(bri.isFinite ? bri : 100.0, 0.0, 100.0) / 100.0
+        let c = v * s
+        let x = c * (1.0 - abs(((h / 60.0).truncatingRemainder(dividingBy: 2.0)) - 1.0))
+        let m = v - c
+        let (r1, g1, b1): (Double, Double, Double)
+        switch h {
+        case 0..<60: (r1, g1, b1) = (c, x, 0)
+        case 60..<120: (r1, g1, b1) = (x, c, 0)
+        case 120..<180: (r1, g1, b1) = (0, c, x)
+        case 180..<240: (r1, g1, b1) = (0, x, c)
+        case 240..<300: (r1, g1, b1) = (x, 0, c)
+        default: (r1, g1, b1) = (c, 0, x)
+        }
+        return rgbToHex(
+            r: Int(((r1 + m) * 255.0).rounded()),
+            g: Int(((g1 + m) * 255.0).rounded()),
+            b: Int(((b1 + m) * 255.0).rounded())
+        )
     }
 }
 

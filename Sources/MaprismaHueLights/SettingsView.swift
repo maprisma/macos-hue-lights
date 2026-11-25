@@ -508,10 +508,14 @@ struct SettingsView: View {
                     }
 
                     SettingsSection(
-                        title: store.tr("Bridge"),
-                        description: store.tr("Connected Philips Hue Bridge on your local network. Credentials are stored securely in your macOS Keychain.")
+                        title: store.tr("Bridges & Devices"),
+                        description: store.tr("Connect a Philips Hue Bridge plus Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, or IKEA DIRIGERA on your local network. Tokens are stored securely in your macOS Keychain.")
                     ) {
                         bridge
+                        if !store.snapshot.isDemo {
+                            Divider()
+                            extraProvidersSection
+                        }
                     }
 
                     Text(store.tr("Independent third-party app. Not affiliated with or endorsed by Signify Holding / Philips Hue."))
@@ -614,7 +618,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var bridge: some View {
         let s = store.snapshot
-        if s.isPaired, let info = s.bridge {
+        if s.hueBridgePaired, let info = s.bridge {
             HStack(spacing: 10) {
                 Image(systemName: "wifi.router")
                     .font(.system(size: 18))
@@ -646,9 +650,112 @@ struct SettingsView: View {
                 }
             }
         } else {
-            Text(store.tr("No bridge paired"))
-                .font(store.scaledFont(12))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(store.tr("No bridge paired"))
+                    .font(store.scaledFont(12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if s.isPaired && !s.isDemo {
+                    Button(store.tr("Pair a Hue bridge")) {
+                        store.showPairHueSheet = true
+                        store.discover()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var extraProvidersSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(store.tr("Other smart lights & hubs"))
+                    .font(store.scaledFont(12, weight: .medium))
+                Spacer()
+                Button {
+                    store.openAddProvider()
+                } label: {
+                    Label(store.tr("Add Device…"), systemImage: "plus")
+                        .font(store.scaledFont(11, weight: .medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            if store.providerConnections.isEmpty {
+                Text(store.tr("No extra devices added yet. Mix Hue with WLED, WiZ, LIFX, Govee, Nanoleaf, Shelly, IKEA DIRIGERA, or Home Assistant."))
+                    .font(store.scaledFont(11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(store.providerConnections) { conn in
+                        let status = store.snapshot.providers.first(where: { $0.id == conn.id })
+                        let connected = status?.connected ?? false
+                        let errText = status?.error ?? ""
+                        let lightCount = status?.lightCount ?? 0
+                        HStack(spacing: 8) {
+                            Image(systemName: conn.kind.safeSFSymbol)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color(hex: conn.kind.accentHex))
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 5) {
+                                    Circle()
+                                        .fill(!conn.enabled ? Color.secondary.opacity(0.4) : (connected ? Color.green : Color.orange))
+                                        .frame(width: 6, height: 6)
+                                    Text(conn.name)
+                                        .font(store.scaledFont(12, weight: .medium))
+                                        .lineLimit(1)
+                                    ProviderBadge(providerRaw: conn.kind.rawValue)
+                                }
+                                Text("\(conn.host):\(conn.effectivePort)" + (lightCount > 0 ? " · \(lightCount)" : ""))
+                                    .font(store.scaledFont(10.5).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                if !errText.isEmpty && conn.enabled {
+                                    Text(errText)
+                                        .font(store.scaledFont(10))
+                                        .foregroundStyle(Color.orange)
+                                        .lineLimit(2)
+                                }
+                            }
+                            Spacer(minLength: 4)
+                            Toggle("", isOn: Binding(
+                                get: { conn.enabled },
+                                set: { store.setProviderEnabled(id: conn.id, enabled: $0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            Button {
+                                store.openEditProvider(conn)
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(.borderless)
+                            .help(store.tr("Edit Lighting Device"))
+                            Button(role: .destructive) {
+                                store.removeProvider(id: conn.id)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(Color.red.opacity(0.85))
+                            }
+                            .buttonStyle(.borderless)
+                            .help(store.tr("Remove Device"))
+                        }
+                        .padding(8)
+                        .background(
+                            RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
+                                .fill(Color.primary.opacity(0.04))
+                        )
+                    }
+                }
+            }
         }
     }
 }

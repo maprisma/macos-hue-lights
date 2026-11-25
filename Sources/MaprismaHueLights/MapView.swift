@@ -23,7 +23,7 @@ enum LampDialogSheet: Identifiable {
 /// minimalist rotatable furniture stamps, Bezier dependency wires, and 1-click Bridge Sync.
 struct MapView: View {
     enum MapMode: String, CaseIterable, Identifiable {
-        case map, rules
+        case map, plan, rules
         var id: String { rawValue }
     }
 
@@ -77,6 +77,11 @@ struct MapView: View {
     @State private var inspectedBoxID: String? = nil
     @State private var scenesBoxID: String? = nil
     @State private var showBackgroundSheet: Bool = false
+    @State private var ambientMode: FloorplanAmbientMode = .day
+    @State private var showGallerySheet: Bool = false
+    @State private var showShoppingListSheet: Bool = false
+    @State private var selectedPlannedID: String? = nil
+    @State private var editingPlannedLightID: String? = nil
 
     @State private var canvasViewportSize: CGSize = CGSize(width: 720, height: 500)
     @State private var didInitialFit: Bool = false
@@ -116,6 +121,15 @@ struct MapView: View {
     private var mapStudioBody: some View {
         VStack(spacing: 0) {
             toolbar
+            Divider()
+            FloorTabsBar(ambientMode: $ambientMode) {
+                selectedBoxID = nil
+                selectedLightID = nil
+                selectedSensorID = nil
+                selectedStampID = nil
+                selectedPlannedID = nil
+                fitCanvasToContent()
+            }
             Divider()
             syncBannerIfNeeded
             statusToastIfNeeded
@@ -190,6 +204,31 @@ struct MapView: View {
                 .tint(store.skinAccentColor)
                 .preferredColorScheme(store.preferredColorScheme)
         }
+        .sheet(isPresented: $showGallerySheet) {
+            FloorplanGallerySheet {
+                fitCanvasToContent()
+            }
+            .environmentObject(store)
+            .tint(store.skinAccentColor)
+            .preferredColorScheme(store.preferredColorScheme)
+        }
+        .sheet(isPresented: $showShoppingListSheet) {
+            LightingShoppingListSheet()
+                .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .preferredColorScheme(store.preferredColorScheme)
+        }
+        .sheet(isPresented: Binding(
+            get: { editingPlannedLightID != nil },
+            set: { if !$0 { editingPlannedLightID = nil } }
+        )) {
+            if let pid = editingPlannedLightID {
+                PlannedLightInspectorSheet(plannedID: pid)
+                    .environmentObject(store)
+                    .tint(store.skinAccentColor)
+                    .preferredColorScheme(store.preferredColorScheme)
+            }
+        }
     }
 
     // MARK: - Top Studio Toolbar
@@ -209,41 +248,44 @@ struct MapView: View {
                 .controlSize(.small)
                 .help(store.tr("Toggle lamp sidebar"))
 
-                // 2. Map | Rules sub-tab switcher
+                // 2. Map | Plan | Rules sub-tab switcher
                 Picker("", selection: $mode) {
                     Text(store.tr("Map")).tag(MapMode.map)
+                    Text(store.tr("Plan")).tag(MapMode.plan)
                     Text(store.tr("Rules")).tag(MapMode.rules)
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .controlSize(.small)
-                .frame(width: isCompact ? 124 : 148)
+                .frame(width: isCompact ? 168 : 196)
 
                 if mode == .map {
-                    // 3. + Add menu (Room, Zone, 8 Furniture stamps)
+                    // 3. + Add menu (Room shapes, Zone, Furniture stamps including Stairs)
                     Menu {
                         Button {
                             let c = visibleWorldCenter()
-                            store.addFloorplanBox(
-                                kind: "room",
-                                name: store.tr("New Room"),
-                                archetype: "other",
-                                at: c.x - 160,
-                                y: c.y - 120
-                            )
+                            store.addFloorplanBox(kind: "room", name: store.tr("New Room"), archetype: "other", shape: .rectangle, at: c.x - 160, y: c.y - 120)
                         } label: {
                             Label(store.tr("Add Room"), systemImage: "plus.rectangle")
                         }
 
                         Button {
                             let c = visibleWorldCenter()
-                            store.addFloorplanBox(
-                                kind: "zone",
-                                name: store.tr("New Zone"),
-                                archetype: "other",
-                                at: c.x - 170,
-                                y: c.y - 100
-                            )
+                            store.addFloorplanBox(kind: "room", name: store.tr("L-Shape Room"), archetype: "living_room", shape: .lShape, at: c.x - 160, y: c.y - 120)
+                        } label: {
+                            Label(store.tr("Add L-Shape Room"), systemImage: "l.square")
+                        }
+
+                        Button {
+                            let c = visibleWorldCenter()
+                            store.addFloorplanBox(kind: "room", name: store.tr("Bay Window Room"), archetype: "living_room", shape: .bayWindow, at: c.x - 160, y: c.y - 120)
+                        } label: {
+                            Label(store.tr("Add Bay Window Room"), systemImage: "pentagon")
+                        }
+
+                        Button {
+                            let c = visibleWorldCenter()
+                            store.addFloorplanBox(kind: "zone", name: store.tr("New Zone"), archetype: "other", shape: .rectangle, at: c.x - 170, y: c.y - 100)
                         } label: {
                             Label(store.tr("Add Zone"), systemImage: "plus.square.dashed")
                         }
@@ -267,23 +309,66 @@ struct MapView: View {
                     .menuStyle(.borderedButton)
                     .controlSize(.small)
 
-                    // 4. Prototypes menu (6 starter floorplans)
+                    // 4. Visual Floorplan Gallery button
+                    Button {
+                        showGallerySheet = true
+                    } label: {
+                        Label(store.tr("Gallery…"), systemImage: "square.grid.2x2")
+                            .font(store.scaledFont(11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help(store.tr("Open visual apartment & house floorplan gallery"))
+                } else if mode == .plan {
+                    // Plan Mode: Add Planned Fixture / LED Lightstrip
                     Menu {
-                        ForEach(FloorplanTemplate.allCases) { tpl in
+                        ForEach(PlannedLightPreset.all) { preset in
                             Button {
-                                store.applyFloorplanTemplate(tpl)
-                                fitCanvasToContent()
+                                let c = visibleWorldCenter()
+                                let created = store.addPlannedLight(preset: preset, at: FloorplanPoint(x: c.x, y: c.y))
+                                selectedPlannedID = created.id
+                                if ambientMode == .day { ambientMode = .dusk }
                             } label: {
-                                Label(store.tr(tpl.titleKey), systemImage: tpl.symbol)
+                                Label("\(store.tr(preset.titleKey)) (\(preset.lumens) lm)", systemImage: preset.icon.sfSymbol(lit: true))
                             }
                         }
                     } label: {
-                        Label(store.tr("Prototypes"), systemImage: "square.grid.2x2")
+                        Label(store.tr("Add Fixture"), systemImage: "lightbulb.max")
                             .font(store.scaledFont(11, weight: .medium))
                     }
                     .menuStyle(.borderedButton)
                     .controlSize(.small)
-                    .help(store.tr("Choose Floorplan Prototype"))
+
+                    Button {
+                        showShoppingListSheet = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "list.bullet.clipboard")
+                            Text(store.tr("Plan List"))
+                                .font(store.scaledFont(11, weight: .medium))
+                            if !store.floorplan.plannedLights.isEmpty {
+                                Text("\(store.floorplan.plannedLights.count)")
+                                    .font(store.scaledFont(9.5, weight: .bold).monospacedDigit())
+                                    .padding(.horizontal, 4.5)
+                                    .padding(.vertical, 1)
+                                    .background(Capsule().fill(store.skinAccentColor.opacity(0.2)))
+                            }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        showGallerySheet = true
+                    } label: {
+                        Label(store.tr("Gallery…"), systemImage: "square.grid.2x2")
+                            .font(store.scaledFont(11, weight: .medium))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                if mode == .map {
 
                     // 5. View menu (Background… + layers + Auto-sync)
                     Menu {
@@ -936,6 +1021,7 @@ struct MapView: View {
                                     selectedLightID = nil
                                     selectedSensorID = nil
                                     selectedStampID = nil
+                                    selectedPlannedID = nil
                                     armedRuleSource = nil
                                 }
                         )
@@ -955,14 +1041,18 @@ struct MapView: View {
                             .allowsHitTesting(false)
                     }
 
-                    // 1. GPU Canvas: Grid, Minimalist Furniture Stamps, Radial Light Halos, Bezier Dependency Wires
+                    // 1. GPU Canvas: Ambient Dusk/Night, Grid, Furniture Stamps, Wall-Clipped Light Halos, LED Strips, Wires
                     Canvas { ctx, size in
+                        if ambientMode.dimOpacity > 0 {
+                            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color.black.opacity(ambientMode.dimOpacity)))
+                        }
                         drawGrid(in: &ctx, size: size)
                         if store.floorplan.showFurniture {
                             drawFurnitureStamps(in: &ctx)
                         }
-                        if store.floorplan.showGlows {
+                        if store.floorplan.showGlows || mode == .plan {
                             drawLightHalos(in: &ctx)
+                            drawPlannedLightsAndStrips(in: &ctx)
                         }
                         if wiresVisible {
                             drawDependencyWires(in: &ctx, now: timeline.date)
@@ -979,13 +1069,13 @@ struct MapView: View {
 
                     // 2. Direct-Manipulation Furniture Stamp Handles (Map mode)
                     if mode == .map && store.floorplan.showFurniture {
-                        ForEach(store.floorplan.stamps) { stamp in
+                        ForEach(activeFloorStamps) { stamp in
                             stampEditOverlay(stamp)
                         }
                     }
 
-                    // 3. Resizable & Movable Room / Zone Boxes
-                    ForEach(store.floorplan.boxes) { box in
+                    // 3. Resizable, Reshapable Polygon Room / Zone Boxes
+                    ForEach(activeFloorBoxes) { box in
                         roomBoxLayer(box)
                     }
 
@@ -1003,6 +1093,13 @@ struct MapView: View {
                         }
                     }
 
+                    // 4c. Interactive Planned Lighting Fixtures & Bendable LED Strip Nodes
+                    if mode == .plan || !activeFloorPlannedLights.isEmpty {
+                        ForEach(activeFloorPlannedLights) { planned in
+                            plannedLightNodeLayer(planned)
+                        }
+                    }
+
                     // 5. Clickable Wire Midpoint Pills
                     if wiresVisible {
                         ForEach(visibleWireBadges) { badge in
@@ -1010,10 +1107,26 @@ struct MapView: View {
                         }
                     }
 
-                    // 6. Clean 1-line Rules Mode Hint Pill at top of canvas
+                    // 6. Clean 1-line Mode Hint Pill at top of canvas
                     if mode == .rules {
                         VStack {
                             rulesHintPill
+                                .padding(.top, 10)
+                                .padding(.horizontal, 12)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else if mode == .plan {
+                        VStack {
+                            Text(store.tr("Plan Mode: place future fixtures & LED strips, drag corners to reshape rooms, and toggle Day/Dusk/Night."))
+                                .font(store.scaledFont(10.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(.ultraThinMaterial))
+                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+                                .allowsHitTesting(false)
                                 .padding(.top, 10)
                                 .padding(.horizontal, 12)
                             Spacer()
@@ -1037,12 +1150,32 @@ struct MapView: View {
         }
     }
 
+    private var activeFloorBoxes: [FloorplanBox] {
+        store.floorplan.boxes(onFloor: store.floorplan.activeFloorID)
+    }
+
+    private var activeFloorStamps: [FloorplanStamp] {
+        store.floorplan.stamps(onFloor: store.floorplan.activeFloorID)
+    }
+
+    private var activeFloorPlannedLights: [PlannedLight] {
+        store.floorplan.plannedLights(onFloor: store.floorplan.activeFloorID)
+    }
+
     private var placedLights: [HueLight] {
-        store.snapshot.allLights.filter { store.floorplan.lamps[$0.id] != nil }
+        let fid = store.floorplan.activeFloorID
+        return store.snapshot.allLights.filter {
+            guard let p = store.floorplan.lamps[$0.id] else { return false }
+            return p.floorID == fid
+        }
     }
 
     private var placedSensors: [HueSensor] {
-        store.snapshot.sensors.filter { store.floorplan.sensors[$0.id] != nil }
+        let fid = store.floorplan.activeFloorID
+        return store.snapshot.sensors.filter {
+            guard let p = store.floorplan.sensors[$0.id] else { return false }
+            return p.floorID == fid
+        }
     }
 
     @ViewBuilder
@@ -1152,7 +1285,7 @@ struct MapView: View {
         let strokeColor = Color.primary.opacity(0.28)
         let fillColor = Color.primary.opacity(0.06)
 
-        for stamp in store.floorplan.stamps {
+        for stamp in activeFloorStamps {
             let center = worldToScreen(CGPoint(x: stamp.x + stamp.width / 2, y: stamp.y + stamp.height / 2))
             let w = CGFloat(stamp.width) * zoom
             let h = CGFloat(stamp.height) * zoom
@@ -1259,6 +1392,26 @@ struct MapView: View {
                     }
                 }
 
+            case "stairs":
+                let frame = Path(rect)
+                local.fill(frame, with: .color(fillColor))
+                local.stroke(frame, with: .color(strokeColor), lineWidth: 1.3)
+                let steps = 7
+                for i in 1..<steps {
+                    let sy = rect.minY + (rect.height * CGFloat(i) / CGFloat(steps))
+                    var stepLine = Path()
+                    stepLine.move(to: CGPoint(x: rect.minX, y: sy))
+                    stepLine.addLine(to: CGPoint(x: rect.maxX, y: sy))
+                    local.stroke(stepLine, with: .color(strokeColor), lineWidth: 1)
+                }
+                var arrow = Path()
+                arrow.move(to: CGPoint(x: 0, y: rect.maxY - 6))
+                arrow.addLine(to: CGPoint(x: 0, y: rect.minY + 6))
+                arrow.addLine(to: CGPoint(x: -5, y: rect.minY + 12))
+                arrow.move(to: CGPoint(x: 0, y: rect.minY + 6))
+                arrow.addLine(to: CGPoint(x: 5, y: rect.minY + 12))
+                local.stroke(arrow, with: .color(strokeColor), lineWidth: 1.2)
+
             default:
                 let box = Path(roundedRect: rect, cornerRadius: 4)
                 local.stroke(box, with: .color(strokeColor), lineWidth: 1.2)
@@ -1266,22 +1419,91 @@ struct MapView: View {
         }
     }
 
+    private func screenPolygonPath(for box: FloorplanBox) -> Path {
+        var path = Path()
+        let pts = box.effectivePoints
+        for (idx, p) in pts.enumerated() {
+            let sp = worldToScreen(CGPoint(x: p.x, y: p.y))
+            if idx == 0 { path.move(to: sp) } else { path.addLine(to: sp) }
+        }
+        path.closeSubpath()
+        return path
+    }
+
     private func drawLightHalos(in ctx: inout GraphicsContext) {
+        let boost = ambientMode == .night ? 1.45 : (ambientMode == .dusk ? 1.20 : 1.0)
         for light in placedLights where light.on {
             guard let placement = store.floorplan.lamps[light.id] else { continue }
             let center = worldToScreen(CGPoint(x: placement.x, y: placement.y))
             let briFactor = max(0.18, min(1.0, light.bri / 100.0))
-            let radius = CGFloat(48.0 + light.bri * 0.85) * zoom
+            let radius = CGFloat(54.0 + light.bri * 0.95) * zoom
             let base = Color(hex: light.color)
             let gradient = Gradient(stops: [
-                .init(color: base.opacity(0.42 * briFactor), location: 0.0),
-                .init(color: base.opacity(0.16 * briFactor), location: 0.45),
+                .init(color: base.opacity(min(0.85, 0.44 * briFactor * boost)), location: 0.0),
+                .init(color: base.opacity(min(0.55, 0.18 * briFactor * boost)), location: 0.48),
                 .init(color: base.opacity(0.0), location: 1.0),
             ])
-            ctx.fill(
+            let enclosing = FloorplanSpatial.boxContaining(x: placement.x, y: placement.y, in: activeFloorBoxes, kindFilter: "room")
+            var local = ctx
+            if let roomBox = enclosing {
+                local.clip(to: screenPolygonPath(for: roomBox))
+            }
+            local.fill(
                 Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
                 with: .radialGradient(gradient, center: center, startRadius: 4, endRadius: radius)
             )
+        }
+    }
+
+    private func drawPlannedLightsAndStrips(in ctx: inout GraphicsContext) {
+        let boost = ambientMode == .night ? 1.55 : (ambientMode == .dusk ? 1.25 : 1.0)
+        let pxPerM = store.floorplan.pxPerMeter
+        for planned in activeFloorPlannedLights {
+            let base = Color(hex: planned.colorHex)
+            let lumenScale = max(0.35, min(1.2, Double(planned.lumens) / 1400.0))
+            let radius = CGFloat(planned.beamRadius * pxPerM) * zoom
+            let anchor = planned.anchorPoint
+            let enclosing = FloorplanSpatial.boxContaining(x: anchor.x, y: anchor.y, in: activeFloorBoxes, kindFilter: "room")
+
+            if let strip = planned.stripPoints, strip.count >= 2 {
+                var stripPath = Path()
+                for (i, pt) in strip.enumerated() {
+                    let sp = worldToScreen(CGPoint(x: pt.x, y: pt.y))
+                    if i == 0 { stripPath.move(to: sp) } else { stripPath.addLine(to: sp) }
+                }
+                if planned.on {
+                    var glowCtx = ctx
+                    if let roomBox = enclosing { glowCtx.clip(to: screenPolygonPath(for: roomBox)) }
+                    glowCtx.stroke(
+                        stripPath,
+                        with: .color(base.opacity(min(0.65, 0.24 * lumenScale * boost))),
+                        style: StrokeStyle(lineWidth: max(18, radius * 0.42), lineCap: .round, lineJoin: .round)
+                    )
+                    glowCtx.stroke(
+                        stripPath,
+                        with: .color(base.opacity(min(0.9, 0.55 * lumenScale * boost))),
+                        style: StrokeStyle(lineWidth: max(8, 12 * zoom), lineCap: .round, lineJoin: .round)
+                    )
+                }
+                ctx.stroke(
+                    stripPath,
+                    with: .color(planned.on ? base : Color.secondary.opacity(0.6)),
+                    style: StrokeStyle(lineWidth: 3.0, lineCap: .round, lineJoin: .round, dash: [6, 4])
+                )
+            } else if planned.on {
+                let center = worldToScreen(CGPoint(x: planned.x, y: planned.y))
+                let gradient = Gradient(stops: [
+                    .init(color: base.opacity(min(0.85, 0.42 * lumenScale * boost)), location: 0.0),
+                    .init(color: base.opacity(min(0.50, 0.16 * lumenScale * boost)), location: 0.50),
+                    .init(color: base.opacity(0.0), location: 1.0),
+                ])
+                var local = ctx
+                if let roomBox = enclosing { local.clip(to: screenPolygonPath(for: roomBox)) }
+                local.fill(
+                    Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)),
+                    with: .radialGradient(gradient, center: center, startRadius: 4, endRadius: radius)
+                )
+            }
         }
     }
 
@@ -1853,6 +2075,150 @@ struct MapView: View {
         .zIndex(hoveredSensorID == sensor.id ? 100 : (isSelected || isArmed ? 12 : 2))
     }
 
+    // MARK: - Interactive Planned Light & Bendable LED Strip Nodes
+
+    @ViewBuilder
+    private func plannedLightNodeLayer(_ planned: PlannedLight) -> some View {
+        let isSelected = selectedPlannedID == planned.id
+        let anchor = planned.anchorPoint
+        let pos = worldToScreen(CGPoint(x: anchor.x, y: anchor.y))
+        let base = Color(hex: planned.colorHex)
+
+        // Draggable LED strip vertices + midpoint '+' handles when selected
+        if let strip = planned.stripPoints, strip.count >= 2, (isSelected || mode == .plan) {
+            ForEach(Array(strip.enumerated()), id: \.offset) { idx, pt in
+                let sp = worldToScreen(CGPoint(x: pt.x, y: pt.y))
+                Circle()
+                    .fill(isSelected ? store.skinAccentColor : base)
+                    .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
+                    .frame(width: 12, height: 12)
+                    .position(sp)
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .named("floorplanCanvas"))
+                            .onChanged { val in
+                                selectedPlannedID = planned.id
+                                var copy = planned
+                                if var pts = copy.stripPoints, pts.indices.contains(idx) {
+                                    let w = screenToWorld(val.location)
+                                    pts[idx] = FloorplanPoint(x: Double(w.x), y: Double(w.y))
+                                    copy.stripPoints = pts
+                                    store.updatePlannedLight(copy, finalize: false)
+                                }
+                            }
+                            .onEnded { val in
+                                var copy = planned
+                                if var pts = copy.stripPoints, pts.indices.contains(idx) {
+                                    let w = screenToWorld(val.location)
+                                    pts[idx] = FloorplanPoint(x: store.floorplan.snapped(Double(w.x)), y: store.floorplan.snapped(Double(w.y)))
+                                    copy.stripPoints = pts
+                                    store.updatePlannedLight(copy, finalize: true)
+                                }
+                            }
+                    )
+                    .contextMenu {
+                        if strip.count > 2 {
+                            Button(store.tr("Remove Corner"), role: .destructive) {
+                                var copy = planned
+                                if var pts = copy.stripPoints, pts.count > 2, pts.indices.contains(idx) {
+                                    pts.remove(at: idx)
+                                    copy.stripPoints = pts
+                                    store.updatePlannedLight(copy, finalize: true)
+                                }
+                            }
+                        }
+                    }
+            }
+            if isSelected {
+                ForEach(0..<(strip.count - 1), id: \.self) { edgeIdx in
+                    let a = strip[edgeIdx]
+                    let b = strip[edgeIdx + 1]
+                    let mid = worldToScreen(CGPoint(x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5))
+                    Button {
+                        var copy = planned
+                        if var pts = copy.stripPoints, pts.count < 24 {
+                            pts.insert(FloorplanPoint(x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5), at: edgeIdx + 1)
+                            copy.stripPoints = pts
+                            store.updatePlannedLight(copy, finalize: true)
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 15, height: 15)
+                            .background(Circle().fill(store.skinAccentColor))
+                    }
+                    .buttonStyle(.plain)
+                    .position(mid)
+                }
+            }
+        }
+
+        // Main planned fixture badge (dashed blueprint circle + lumen tag)
+        let size: CGFloat = max(26, min(36, 30 * zoom))
+        ZStack {
+            Circle()
+                .fill(planned.on ? base.opacity(0.88) : Color(NSColor.controlBackgroundColor).opacity(0.9))
+                .overlay(
+                    Circle().strokeBorder(
+                        isSelected ? store.skinAccentColor : Color.white.opacity(0.9),
+                        style: StrokeStyle(lineWidth: isSelected ? 2.4 : 1.6, dash: [4, 2.5])
+                    )
+                )
+                .frame(width: size, height: size)
+            Image(systemName: planned.icon.sfSymbol(lit: planned.on))
+                .font(.system(size: size * 0.44, weight: .semibold))
+                .foregroundStyle(planned.on ? Color.black.opacity(0.85) : Color.secondary)
+        }
+        .overlay(alignment: .bottom) {
+            Text("\(planned.lumens) lm")
+                .font(store.scaledFont(8.5, weight: .semibold).monospacedDigit())
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(.regularMaterial))
+                .offset(y: 12)
+                .allowsHitTesting(false)
+        }
+        .position(pos)
+        .help("\(planned.name) · \(planned.lumens) lm · \(planned.kelvin) K")
+        .onTapGesture(count: 2) {
+            editingPlannedLightID = planned.id
+        }
+        .onTapGesture {
+            selectedPlannedID = planned.id
+            selectedBoxID = nil
+            store.togglePlannedLight(id: planned.id)
+        }
+        .contextMenu {
+            Button(planned.on ? store.tr("Turn off") : store.tr("Turn on")) {
+                store.togglePlannedLight(id: planned.id)
+            }
+            Button(store.tr("Edit Planned Fixture")) {
+                editingPlannedLightID = planned.id
+            }
+            Divider()
+            Button(store.tr("Delete"), role: .destructive) {
+                store.deletePlannedLight(id: planned.id)
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 2, coordinateSpace: .named("floorplanCanvas"))
+                .onChanged { val in
+                    selectedPlannedID = planned.id
+                    let w = screenToWorld(val.location)
+                    let dx = Double(w.x) - anchor.x
+                    let dy = Double(w.y) - anchor.y
+                    store.updatePlannedLight(planned.translated(dx: dx, dy: dy), finalize: false)
+                }
+                .onEnded { val in
+                    let w = screenToWorld(val.location)
+                    let dx = store.floorplan.snapped(Double(w.x)) - anchor.x
+                    let dy = store.floorplan.snapped(Double(w.y)) - anchor.y
+                    store.updatePlannedLight(planned.translated(dx: dx, dy: dy), finalize: true)
+                }
+        )
+        .zIndex(isSelected ? 16 : 6)
+    }
+
     private func finishWireDrag(from source: WireEndpoint, atScreen screenPoint: CGPoint) {
         defer {
             wireDraftSource = nil
@@ -1919,23 +2285,30 @@ struct MapView: View {
         var maxX = -Double.infinity
         var maxY = -Double.infinity
 
-        for b in store.floorplan.boxes {
+        for b in activeFloorBoxes {
             minX = min(minX, b.minX)
             minY = min(minY, b.minY)
             maxX = max(maxX, b.maxX)
             maxY = max(maxY, b.maxY)
         }
-        for p in store.floorplan.lamps.values {
+        for p in store.floorplan.lamps.values where p.floorID == store.floorplan.activeFloorID {
             minX = min(minX, p.x - 40)
             minY = min(minY, p.y - 40)
             maxX = max(maxX, p.x + 40)
             maxY = max(maxY, p.y + 40)
         }
-        for p in store.floorplan.sensors.values {
+        for p in store.floorplan.sensors.values where p.floorID == store.floorplan.activeFloorID {
             minX = min(minX, p.x - 40)
             minY = min(minY, p.y - 40)
             maxX = max(maxX, p.x + 40)
             maxY = max(maxY, p.y + 40)
+        }
+        for pl in activeFloorPlannedLights {
+            let a = pl.anchorPoint
+            minX = min(minX, a.x - 40)
+            minY = min(minY, a.y - 40)
+            maxX = max(maxX, a.x + 40)
+            maxY = max(maxY, a.y + 40)
         }
         if !minX.isFinite {
             minX = 0; minY = 0; maxX = 900; maxY = 600
@@ -1967,6 +2340,7 @@ struct MapView: View {
         case "bed": return store.tr("Bed")
         case "dining": return store.tr("Dining Table")
         case "kitchen": return store.tr("Kitchen Counter")
+        case "stairs": return store.tr("Stairs")
         default: return kind.capitalized
         }
     }
@@ -1981,6 +2355,7 @@ struct MapView: View {
         case "bed": return "bed.double"
         case "dining": return "fork.knife"
         case "kitchen": return "flame"
+        case "stairs": return "stairs"
         default: return "square"
         }
     }
@@ -2028,21 +2403,43 @@ private struct FloorplanRoomBoxView: View {
             lineWidth: isSelected ? 2.2 : (isZone ? 1.4 : 1.8),
             dash: isZone ? [7, 4] : []
         )
+        let polyShape = FloorplanPolygonShape(
+            points: box.effectivePoints,
+            minX: box.x,
+            minY: box.y,
+            width: box.width,
+            height: box.height
+        )
+        let lightingStats = mode == .plan
+            ? RoomLightingAnalysis.compute(for: box, floorplan: store.floorplan, snapshot: store.snapshot, includePlanned: true)
+            : nil
 
         ZStack(alignment: .topLeading) {
-            // Room surface fill + architectural wall outline (pass-through so wires & canvas panning work cleanly)
-            RoundedRectangle(cornerRadius: isZone ? 10 : 6, style: .continuous)
-                .fill(lit ? tintColor.opacity(0.11) : Color.primary.opacity(0.035))
-                .overlay(
-                    RoundedRectangle(cornerRadius: isZone ? 10 : 6, style: .continuous)
-                        .strokeBorder(
-                            isSelected ? store.skinAccentColor : (lit ? tintColor.opacity(0.55) : Color.primary.opacity(0.24)),
+            // Room surface fill + architectural polygon wall outline (pass-through so wires & canvas panning work cleanly)
+            if box.isPolygon {
+                polyShape
+                    .fill(lit ? tintColor.opacity(0.11) : Color.primary.opacity(0.035))
+                    .overlay(
+                        polyShape.stroke(
+                            isSelected ? store.skinAccentColor : (lit ? tintColor.opacity(0.55) : Color.primary.opacity(0.28)),
                             style: borderStyle
                         )
-                )
-                .allowsHitTesting(false)
+                    )
+                    .allowsHitTesting(false)
+            } else {
+                RoundedRectangle(cornerRadius: isZone ? 10 : 6, style: .continuous)
+                    .fill(lit ? tintColor.opacity(0.11) : Color.primary.opacity(0.035))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: isZone ? 10 : 6, style: .continuous)
+                            .strokeBorder(
+                                isSelected ? store.skinAccentColor : (lit ? tintColor.opacity(0.55) : Color.primary.opacity(0.24)),
+                                style: borderStyle
+                            )
+                    )
+                    .allowsHitTesting(false)
+            }
 
-            // Header bar (name, schedule badge, scenes, inspector, power)
+            // Header bar (name, m², Plan-mode lux badge, schedule badge, scenes, inspector, power)
             HStack(spacing: 4) {
                 Image(systemName: boxSymbol)
                     .font(.system(size: 10, weight: .semibold))
@@ -2056,6 +2453,23 @@ private struct FloorplanRoomBoxView: View {
                     Text("\(room.onCount)/\(room.lights.count)")
                         .font(store.scaledFont(9.5).monospacedDigit())
                         .foregroundStyle(.secondary)
+                }
+
+                Text(String(format: "%.0f m²", box.areaSquareMeters(pxPerMeter: store.floorplan.pxPerMeter)))
+                    .font(store.scaledFont(8.5).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+
+                if let stats = lightingStats {
+                    let lxColor: Color = stats.rating == "balanced" ? .green : (stats.rating == "dim" ? .orange : .cyan)
+                    Text("\(stats.lux) lx")
+                        .font(store.scaledFont(8.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(lxColor)
+                        .padding(.horizontal, 4.5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(lxColor.opacity(0.16)))
                 }
 
                 if let area = motionArea, area.enabled {
@@ -2142,11 +2556,16 @@ private struct FloorplanRoomBoxView: View {
             .clipShape(RoundedRectangle(cornerRadius: isZone ? 9 : 5, style: .continuous))
             .contentShape(Rectangle())
             .onTapGesture { onSelect() }
-            .gesture(moveBoxGesture, including: mode == .map ? .all : .none)
+            .gesture(moveBoxGesture, including: (mode == .map || mode == .plan) ? .all : .none)
 
-            // 8 Resize Handles when selected in Map mode
-            if mode == .map && isSelected {
-                resizeHandlesOverlay
+            // Polygon Vertex & Wall-Split '+' Handles + Bounding Resize Handles when selected in Map/Plan mode
+            if (mode == .map || mode == .plan) && isSelected {
+                if box.isPolygon {
+                    polygonHandlesOverlay
+                } else {
+                    resizeHandlesOverlay
+                    wallMidpointSplitOverlay
+                }
             }
 
             // Right-edge connector port in Rules mode (for linked Bridge rooms)
@@ -2212,9 +2631,7 @@ private struct FloorplanRoomBoxView: View {
                 guard let orig = dragStartBox else { return }
                 let dx = Double(value.translation.width / max(0.2, zoom))
                 let dy = Double(value.translation.height / max(0.2, zoom))
-                var next = orig
-                next.x = orig.x + dx
-                next.y = orig.y + dy
+                let next = orig.translated(dx: dx, dy: dy)
                 if let idx = store.floorplan.boxes.firstIndex(where: { $0.id == box.id }) {
                     store.floorplan.boxes[idx] = next
                 }
@@ -2237,11 +2654,11 @@ private struct FloorplanRoomBoxView: View {
                 guard let orig = dragStartBox else { return }
                 let dx = Double(value.translation.width / max(0.2, zoom))
                 let dy = Double(value.translation.height / max(0.2, zoom))
-                var next = orig
-                next.x = store.floorplan.snapped(orig.x + dx)
-                next.y = store.floorplan.snapped(orig.y + dy)
-                let snappedDX = next.x - orig.x
-                let snappedDY = next.y - orig.y
+                let snappedX = store.floorplan.snapped(orig.x + dx)
+                let snappedY = store.floorplan.snapped(orig.y + dy)
+                let snappedDX = snappedX - orig.x
+                let snappedDY = snappedY - orig.y
+                let next = orig.translated(dx: snappedDX, dy: snappedDY)
                 if let idx = store.floorplan.boxes.firstIndex(where: { $0.id == box.id }) {
                     store.floorplan.boxes[idx] = next
                 }
@@ -2265,6 +2682,104 @@ private struct FloorplanRoomBoxView: View {
                 dragStartSensors = [:]
                 store.persistFloorplan()
             }
+    }
+
+    private func localPoint(for world: FloorplanPoint) -> CGPoint {
+        let sx = CGFloat(world.x - box.x) * (width / max(1.0, CGFloat(box.width)))
+        let sy = CGFloat(world.y - box.y) * (height / max(1.0, CGFloat(box.height)))
+        return CGPoint(x: sx, y: sy)
+    }
+
+    /// Wall midpoint '+' handles & wall length tags for splitting any wall into a bendable corner.
+    private var wallMidpointSplitOverlay: some View {
+        let segs = box.wallSegments
+        let pxPerM = store.floorplan.pxPerMeter
+        return ForEach(segs, id: \.index) { seg in
+            let mp = localPoint(for: seg.mid)
+            if seg.lengthPx * Double(zoom) >= 44 {
+                VStack(spacing: 1) {
+                    Button {
+                        store.insertBoxVertex(boxID: box.id, afterEdge: seg.index, at: seg.mid)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 14, height: 14)
+                            .background(Circle().fill(store.skinAccentColor.opacity(0.88)))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.8), lineWidth: 0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .help(store.tr("Add wall corner here"))
+
+                    Text(String(format: "%.1f m", seg.lengthPx / max(10.0, pxPerM)))
+                        .font(store.scaledFont(8).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 3)
+                        .background(Capsule().fill(.ultraThinMaterial))
+                        .allowsHitTesting(false)
+                }
+                .position(mp)
+            }
+        }
+    }
+
+    /// Draggable polygon corner vertices + wall midpoint '+' split handles (double-click or right-click vertex to remove).
+    private var polygonHandlesOverlay: some View {
+        let pts = box.effectivePoints
+        return ZStack {
+            wallMidpointSplitOverlay
+            ForEach(Array(pts.enumerated()), id: \.offset) { idx, pt in
+                let lp = localPoint(for: pt)
+                ZStack {
+                    Circle()
+                        .fill(store.skinAccentColor)
+                        .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
+                        .frame(width: 11, height: 11)
+                }
+                .frame(width: 22, height: 22)
+                .contentShape(Circle())
+                .position(lp)
+                .help(store.tr("Drag corner to reshape room (right-click to delete corner)"))
+                .onTapGesture(count: 2) {
+                    if pts.count > 3 {
+                        store.removeBoxVertex(boxID: box.id, vertexIndex: idx)
+                    }
+                }
+                .contextMenu {
+                    if pts.count > 3 {
+                        Button(store.tr("Remove Corner"), role: .destructive) {
+                            store.removeBoxVertex(boxID: box.id, vertexIndex: idx)
+                        }
+                    }
+                    Button(store.tr("Reset to Rectangle")) {
+                        store.reshapeBox(id: box.id, shape: .rectangle)
+                    }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { val in
+                            if dragStartBox == nil { dragStartBox = box }
+                            guard let orig = dragStartBox else { return }
+                            let origPts = orig.effectivePoints
+                            guard origPts.indices.contains(idx) else { return }
+                            let dx = Double(val.translation.width / max(0.2, zoom))
+                            let dy = Double(val.translation.height / max(0.2, zoom))
+                            let target = FloorplanPoint(x: origPts[idx].x + dx, y: origPts[idx].y + dy)
+                            store.moveBoxVertex(boxID: box.id, vertexIndex: idx, to: target, finalize: false)
+                        }
+                        .onEnded { val in
+                            guard let orig = dragStartBox else { return }
+                            let origPts = orig.effectivePoints
+                            guard origPts.indices.contains(idx) else { dragStartBox = nil; return }
+                            let dx = Double(val.translation.width / max(0.2, zoom))
+                            let dy = Double(val.translation.height / max(0.2, zoom))
+                            let target = FloorplanPoint(x: origPts[idx].x + dx, y: origPts[idx].y + dy)
+                            store.moveBoxVertex(boxID: box.id, vertexIndex: idx, to: target, finalize: true)
+                            dragStartBox = nil
+                        }
+                )
+            }
+        }
     }
 
     private var resizeHandlesOverlay: some View {
@@ -2314,48 +2829,52 @@ private struct FloorplanRoomBoxView: View {
     private func applyResize(orig: FloorplanBox, edge: ResizeEdge, translation: CGSize, finalize: Bool) {
         let dx = Double(translation.width / max(0.2, zoom))
         let dy = Double(translation.height / max(0.2, zoom))
-        var next = orig
+        var nextX = orig.x
+        var nextY = orig.y
+        var nextW = orig.width
+        var nextH = orig.height
 
         switch edge {
         case .topLeft:
             let newX = min(orig.maxX - FloorplanBox.minWidth, orig.x + dx)
             let newY = min(orig.maxY - FloorplanBox.minHeight, orig.y + dy)
-            next.x = finalize ? store.floorplan.snapped(newX) : newX
-            next.y = finalize ? store.floorplan.snapped(newY) : newY
-            next.width = max(FloorplanBox.minWidth, orig.maxX - next.x)
-            next.height = max(FloorplanBox.minHeight, orig.maxY - next.y)
+            nextX = finalize ? store.floorplan.snapped(newX) : newX
+            nextY = finalize ? store.floorplan.snapped(newY) : newY
+            nextW = max(FloorplanBox.minWidth, orig.maxX - nextX)
+            nextH = max(FloorplanBox.minHeight, orig.maxY - nextY)
         case .top:
             let newY = min(orig.maxY - FloorplanBox.minHeight, orig.y + dy)
-            next.y = finalize ? store.floorplan.snapped(newY) : newY
-            next.height = max(FloorplanBox.minHeight, orig.maxY - next.y)
+            nextY = finalize ? store.floorplan.snapped(newY) : newY
+            nextH = max(FloorplanBox.minHeight, orig.maxY - nextY)
         case .topRight:
             let newY = min(orig.maxY - FloorplanBox.minHeight, orig.y + dy)
             let newW = max(FloorplanBox.minWidth, orig.width + dx)
-            next.y = finalize ? store.floorplan.snapped(newY) : newY
-            next.height = max(FloorplanBox.minHeight, orig.maxY - next.y)
-            next.width = finalize ? max(FloorplanBox.minWidth, store.floorplan.snapped(newW)) : newW
+            nextY = finalize ? store.floorplan.snapped(newY) : newY
+            nextH = max(FloorplanBox.minHeight, orig.maxY - nextY)
+            nextW = finalize ? max(FloorplanBox.minWidth, store.floorplan.snapped(newW)) : newW
         case .right:
             let newW = max(FloorplanBox.minWidth, orig.width + dx)
-            next.width = finalize ? max(FloorplanBox.minWidth, store.floorplan.snapped(newW)) : newW
+            nextW = finalize ? max(FloorplanBox.minWidth, store.floorplan.snapped(newW)) : newW
         case .bottomRight:
             let newW = max(FloorplanBox.minWidth, orig.width + dx)
             let newH = max(FloorplanBox.minHeight, orig.height + dy)
-            next.width = finalize ? max(FloorplanBox.minWidth, store.floorplan.snapped(newW)) : newW
-            next.height = finalize ? max(FloorplanBox.minHeight, store.floorplan.snapped(newH)) : newH
+            nextW = finalize ? max(FloorplanBox.minWidth, store.floorplan.snapped(newW)) : newW
+            nextH = finalize ? max(FloorplanBox.minHeight, store.floorplan.snapped(newH)) : newH
         case .bottom:
             let newH = max(FloorplanBox.minHeight, orig.height + dy)
-            next.height = finalize ? max(FloorplanBox.minHeight, store.floorplan.snapped(newH)) : newH
+            nextH = finalize ? max(FloorplanBox.minHeight, store.floorplan.snapped(newH)) : newH
         case .bottomLeft:
             let newX = min(orig.maxX - FloorplanBox.minWidth, orig.x + dx)
             let newH = max(FloorplanBox.minHeight, orig.height + dy)
-            next.x = finalize ? store.floorplan.snapped(newX) : newX
-            next.width = max(FloorplanBox.minWidth, orig.maxX - next.x)
-            next.height = finalize ? max(FloorplanBox.minHeight, store.floorplan.snapped(newH)) : newH
+            nextX = finalize ? store.floorplan.snapped(newX) : newX
+            nextW = max(FloorplanBox.minWidth, orig.maxX - nextX)
+            nextH = finalize ? max(FloorplanBox.minHeight, store.floorplan.snapped(newH)) : newH
         case .left:
             let newX = min(orig.maxX - FloorplanBox.minWidth, orig.x + dx)
-            next.x = finalize ? store.floorplan.snapped(newX) : newX
-            next.width = max(FloorplanBox.minWidth, orig.maxX - next.x)
+            nextX = finalize ? store.floorplan.snapped(newX) : newX
+            nextW = max(FloorplanBox.minWidth, orig.maxX - nextX)
         }
+        let next = orig.scaledTo(x: nextX, y: nextY, width: nextW, height: nextH)
         store.updateFloorplanBox(next, finalize: finalize)
     }
 }
@@ -2720,6 +3239,7 @@ private struct RoomBoxInspectorPopover: View {
     @State private var archetype: String = "other"
     @State private var linkedHueID: String = ""
     @State private var linkedEntID: String = ""
+    @State private var floorID: String = "eg"
 
     private static let archetypes: [(id: String, label: String)] = [
         ("living_room", "Living Room"),
@@ -2773,6 +3293,37 @@ private struct RoomBoxInspectorPopover: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .controlSize(.small)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(store.tr("Room Shape"))
+                    .font(store.scaledFont(10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 4) {
+                    ForEach(FloorplanRoomShape.allCases) { shape in
+                        Button(store.tr(shape.titleKey)) {
+                            store.reshapeBox(id: box.id, shape: shape)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
+                }
+            }
+
+            if store.floorplan.floors.count > 1 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(store.tr("Floor"))
+                        .font(store.scaledFont(10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $floorID) {
+                        ForEach(store.floorplan.floors) { f in
+                            Text(f.name).tag(f.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -2908,6 +3459,7 @@ private struct RoomBoxInspectorPopover: View {
             archetype = box.archetype
             linkedHueID = box.hueID ?? ""
             linkedEntID = box.entertainmentAreaID ?? ""
+            floorID = box.floorID
         }
     }
 
@@ -2919,6 +3471,7 @@ private struct RoomBoxInspectorPopover: View {
         copy.archetype = archetype
         copy.hueID = linkedHueID.isEmpty ? nil : linkedHueID
         copy.entertainmentAreaID = linkedEntID.isEmpty ? nil : linkedEntID
+        copy.floorID = floorID
         return copy
     }
 

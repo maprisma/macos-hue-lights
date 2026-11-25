@@ -206,6 +206,7 @@ public struct SettingsStore {
     public var rulesFile: URL { directory.appendingPathComponent("rules.json") }
     public var localSchedulesFile: URL { directory.appendingPathComponent("schedules.json") }
     public var themesFile: URL { directory.appendingPathComponent("themes.json") }
+    public var providersFile: URL { directory.appendingPathComponent("providers.json") }
 
     public init(directory: URL = SettingsStore.defaultDirectory()) {
         self.directory = directory
@@ -546,6 +547,20 @@ public struct SettingsStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(schedules)
         try writeAtomic(data: data, to: localSchedulesFile, prefix: ".schedules.")
+    }
+
+    // MARK: - Multi-Device Providers persistence (`providers.json`)
+
+    public func loadProviders() -> [ProviderConnection] {
+        guard let data = try? Data(contentsOf: providersFile), data.count <= 256 * 1024 else { return [] }
+        return (try? JSONDecoder().decode([ProviderConnection].self, from: data)) ?? []
+    }
+
+    public func saveProviders(_ providers: [ProviderConnection]) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(providers)
+        try writeAtomic(data: data, to: providersFile, prefix: ".providers.")
     }
 
     // MARK: - Spatial Floorplan & Custom Background Image persistence

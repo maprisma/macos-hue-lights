@@ -505,6 +505,7 @@ public final class HueToolDispatcher {
             "rooms": .array(snap.rooms.map { roomJSON($0, snap: snap) }),
             "sensors": .array(snap.sensors.map(sensorJSON)),
             "motion_areas": .array(snap.motionAreas.map(motionAreaJSON)),
+            "providers": .array(snap.providers.map(providerStatusJSON)),
             "rules_count": .int(backend.currentRules.count),
             "schedules_count": .int(backend.currentSchedules.count),
         ])
@@ -525,9 +526,10 @@ public final class HueToolDispatcher {
             "phase": .string(snap.phase),
             "is_demo": .bool(snap.isDemo),
             "bridge": sanitizedBridgeJSON(snap.bridge),
+            "providers": .array(snap.providers.map(providerStatusJSON)),
             "light_count": .int(snap.lightCount),
             "on_count": .int(snap.onCount),
-            "lit_lights": .array(litLights.map { .object(["id": .string($0.id), "name": .string($0.name), "bri": .int(Int($0.bri.rounded()))]) }),
+            "lit_lights": .array(litLights.map { .object(["id": .string($0.id), "name": .string($0.name), "bri": .int(Int($0.bri.rounded())), "provider": .string($0.provider)]) }),
             "rules_count": .int(backend.currentRules.count),
             "schedules_count": .int(backend.currentSchedules.count),
             "sensors_count": .int(snap.sensors.count),
@@ -1032,10 +1034,23 @@ public final class HueToolDispatcher {
         ])
     }
 
+    private func providerStatusJSON(_ p: ProviderStatus) -> HueJSONValue {
+        .object([
+            "id": .string(p.id),
+            "kind": .string(p.kind.rawValue),
+            "name": .string(p.name),
+            "host": .string(p.host),
+            "connected": .bool(p.connected),
+            "enabled": .bool(p.enabled),
+            "light_count": .int(p.lightCount),
+        ])
+    }
+
     private func lightJSON(_ l: HueLight) -> HueJSONValue {
         var obj: [String: HueJSONValue] = [
             "id": .string(l.id),
             "name": .string(l.name),
+            "provider": .string(l.provider),
             "on": .bool(l.on),
             "bri": .int(Int(l.bri.rounded())),
             "color": .string(l.color),
@@ -1056,6 +1071,7 @@ public final class HueToolDispatcher {
             "id": .string(r.id),
             "kind": .string(r.kind),
             "name": .string(r.name),
+            "provider": .string(r.provider),
             "on": .bool(r.on),
             "bri": .int(Int(r.bri.rounded())),
             "on_count": .int(r.onCount),
@@ -1071,6 +1087,7 @@ public final class HueToolDispatcher {
             "id": .string(s.id),
             "kind": .string(s.kind),
             "name": .string(s.name),
+            "provider": .string(s.provider),
             "room_id": .string(s.roomID),
             "enabled": .bool(s.enabled),
             "motion": .bool(s.motion),
@@ -2329,17 +2346,18 @@ public final class HueMCPServer {
             stopClient = { demoClient.stop() }
         } else {
             #if canImport(Security) && canImport(Network) && canImport(CryptoKit)
-            let nativeClient = NativeHueBridgeClient(
+            let multiClient = MultiProviderBridgeClient(
                 keychain: KeychainStore(),
+                settings: settings,
                 rules: settings.loadRules(),
                 rulesPaused: settings.rulesPaused()
             )
-            let initialSnap = await nativeClient.refreshNow()
-            let backend = HeadlessHueToolBackend(client: nativeClient, settings: settings, initialSnapshot: initialSnap)
+            let initialSnap = await multiClient.refreshNow()
+            let backend = HeadlessHueToolBackend(client: multiClient, settings: settings, initialSnapshot: initialSnap)
             server = HueMCPServer(backend: backend, refreshHook: {
-                _ = await nativeClient.refreshNow()
+                _ = await multiClient.refreshNow()
             })
-            stopClient = { nativeClient.stop() }
+            stopClient = { multiClient.stop() }
             #else
             let demoClient = DemoBridgeClient()
             demoClient.start()

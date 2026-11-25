@@ -64,6 +64,36 @@ struct ContentView: View {
                 .fontDesign(store.fontDesign)
                 .preferredColorScheme(store.preferredColorScheme)
         }
+        .sheet(isPresented: $store.showAddProviderSheet) {
+            AddProviderSheet(editing: store.editingProvider, preselectedKind: store.preselectedProviderKind)
+                .environmentObject(store)
+                .tint(store.skinAccentColor)
+                .fontDesign(store.fontDesign)
+                .preferredColorScheme(store.preferredColorScheme)
+        }
+        .sheet(isPresented: $store.showPairHueSheet) {
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button(store.tr("Close")) { store.showPairHueSheet = false }
+                        .keyboardShortcut(.cancelAction)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 12)
+                ScrollView {
+                    PairingView()
+                        .padding(16)
+                }
+            }
+            .frame(width: 420, height: 500)
+            .environmentObject(store)
+            .tint(store.skinAccentColor)
+            .fontDesign(store.fontDesign)
+            .preferredColorScheme(store.preferredColorScheme)
+            .onChange(of: store.snapshot.hueBridgePaired) { paired in
+                if paired { store.showPairHueSheet = false }
+            }
+        }
         .background(
             WindowObserver(
                 mode: mode,

@@ -49,8 +49,13 @@ targets:
         LSUIElement: true
         NSHighResolutionCapable: true
         NSHumanReadableCopyright: "© 2026 Uwe Bruckhaus. All rights reserved."
-        NSLocalNetworkUsageDescription: "Maprisma Lights finds your Philips Hue bridge on the local network and switches its lights. It talks only to the bridge."
+        NSLocalNetworkUsageDescription: "Maprisma Lights finds your Philips Hue bridge and local smart lights (Home Assistant, WLED, WiZ, LIFX, Govee, Nanoleaf, Shelly, IKEA DIRIGERA) on your local network. It talks only to your local devices."
         NSMicrophoneUsageDescription: "Optional: Maprisma Lights uses your microphone only when you start the Light Synthesizer in Microphone mode. Audio is analyzed in memory only and is never recorded or sent off your Mac."
         NSScreenCaptureUsageDescription: "Optional: Maprisma Lights uses Screen and System Audio Recording only when you start the Light Synthesizer in System Audio mode to sync lights with music or movies. Audio is analyzed in memory only and is never recorded or sent off your Mac."
         NSBonjourServices:
           - _hue._tcp
+          - _home-assistant._tcp
+          - _wled._tcp
+          - _nanoleafapi._tcp
+          - _shelly._tcp
+          - _ihsp._tcp

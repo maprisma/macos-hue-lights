@@ -867,6 +867,29 @@ class SwiftAppTests(unittest.TestCase):
         self.assertIn("$HOME/Applications", install)
         self.assertIn("-w /Applications", install)
 
+    def test_multi_provider_architecture_contract(self):
+        models = read("Sources", "HueCore", "MultiProviderModels.swift")
+        clients = read("Sources", "HueCore", "MultiProviderClients.swift")
+        coord = read("Sources", "HueCore", "MultiProviderCoordinator.swift")
+        view = read("Sources", "MaprismaHueLights", "ProvidersView.swift")
+        pairing = read("Sources", "MaprismaHueLights", "PairingView.swift")
+        settings = read("Sources", "MaprismaHueLights", "SettingsView.swift")
+        build = read("build-mac.sh")
+        proj = read("MacAppStore", "project.yml")
+
+        for kind in ("homeAssistant", "wled", "wiz", "lifx", "govee", "nanoleaf", "shelly", "dirigera"):
+            self.assertIn(f"case {kind}", models)
+        for parser in ("HomeAssistantParser", "WLEDParser", "WiZCodec", "LIFXCodec", "GoveeCodec", "NanoleafParser", "ShellyParser", "DirigeraParser"):
+            self.assertIn(parser, clients)
+        self.assertIn("class MultiProviderBridgeClient: HueBridgeControlling", coord)
+        self.assertIn("struct AddProviderSheet: View", view)
+        self.assertIn("struct ProviderBadge: View", view)
+        self.assertIn("LightProviderKind.extraProviders", pairing)
+        self.assertIn("extraProvidersSection", settings)
+        for svc in ("_hue._tcp", "_home-assistant._tcp", "_wled._tcp", "_nanoleafapi._tcp", "_shelly._tcp", "_ihsp._tcp"):
+            self.assertIn(svc, build)
+            self.assertIn(svc, proj)
+
     def test_ci_workflow(self):
         ci = read(".github", "workflows", "macos-ci.yml")
         self.assertIn("runs-on: macos-latest", ci)

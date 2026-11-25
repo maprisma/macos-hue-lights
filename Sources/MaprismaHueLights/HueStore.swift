@@ -65,6 +65,15 @@ final class HueStore: ObservableObject {
     @Published var themeEditorLight: HueLight?
     @Published var showAskAISheet: Bool = false
     @Published var showProUpgradeSheet: Bool = false
+    @Published var showAddProviderSheet: Bool = false
+    @Published var editingProvider: ProviderConnection? = nil
+    @Published var preselectedProviderKind: LightProviderKind? = nil
+    @Published var showPairHueSheet: Bool = false
+
+    // Multi-Device Providers (Home Assistant, WLED, WiZ, LIFX, Govee, Nanoleaf, Shelly, IKEA DIRIGERA)
+    @Published private(set) var providerConnections: [ProviderConnection] = []
+    @Published private(set) var discoveredProviders: [DiscoveredProviderDevice] = []
+    @Published private(set) var discoveringProviders: Bool = false
 
     // Visual Floorplan & Spatial Light Studio
     @Published var floorplan: FloorplanDocument = FloorplanDocument()
@@ -103,6 +112,7 @@ final class HueStore: ObservableObject {
     private let entertainmentStreamer = EntertainmentStreamer()
     private let hotKeyManager = GlobalHotKeyManager()
     private var client: HueBridgeControlling
+    private var multiClient: MultiProviderBridgeClient?
     private var debouncer: BrightnessDebouncer?
     private var localScheduleTask: Task<Void, Never>?
     private var synthPhase: Double = 0.0
@@ -138,8 +148,10 @@ final class HueStore: ObservableObject {
         cachedWindowFrame = settings.windowFrame()
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
 
-        let nativeClient = NativeHueBridgeClient(rules: savedRules, rulesPaused: savedPaused)
-        client = nativeClient
+        let multi = MultiProviderBridgeClient(settings: settings, rules: savedRules, rulesPaused: savedPaused)
+        client = multi
+        multiClient = multi
+        providerConnections = multi.connections
 
         debouncer = BrightnessDebouncer(interval: 0.15, send: { [weak self] target, value in
             Task { @MainActor [weak self] in
@@ -161,13 +173,19 @@ final class HueStore: ObservableObject {
             self?.handleHotKeyAction(action)
         }
 
-        attachClient(nativeClient)
+        attachClient(multi)
     }
 
     private func attachClient(_ newClient: HueBridgeControlling) {
         client = newClient
+        multiClient = newClient as? MultiProviderBridgeClient
         client.onSnapshot = { [weak self] snapshot in
             self?.receive(snapshot)
+        }
+        multiClient?.onProvidersChanged = { [weak self] conns, discovered, scanning in
+            self?.providerConnections = conns
+            self?.discoveredProviders = discovered
+            self?.discoveringProviders = scanning
         }
     }
 
@@ -258,9 +276,10 @@ final class HueStore: ObservableObject {
         let savedPaused = settings.rulesPaused()
         rules = savedRules
         rulesPaused = savedPaused
-        let native = NativeHueBridgeClient(rules: savedRules, rulesPaused: savedPaused)
-        attachClient(native)
-        native.start()
+        let multi = MultiProviderBridgeClient(settings: settings, rules: savedRules, rulesPaused: savedPaused)
+        attachClient(multi)
+        providerConnections = multi.connections
+        multi.start()
         page = .main
         tab = .lights
     }
@@ -926,7 +945,9 @@ final class HueStore: ObservableObject {
     }
 
     func createSchedule(_ draft: HueScheduleDraft) {
-        if scheduleMode == .local {
+        let targetIsNonHue = HueColorMath.providerPrefix(of: draft.targetID) != "hue"
+            || (!draft.sceneID.isEmpty && HueColorMath.providerPrefix(of: draft.sceneID) != "hue")
+        if scheduleMode == .local || !snapshot.hueBridgePaired || targetIsNonHue {
             let schedule = HueSchedule(
                 id: UUID().uuidString.lowercased(),
                 name: HueColorMath.clean(draft.name).isEmpty ? tr("Schedule") : HueColorMath.clean(draft.name),
@@ -1148,6 +1169,62 @@ final class HueStore: ObservableObject {
         if !ip.isEmpty { client.pair(ip: ip) }
     }
 
+    // MARK: - Multi-Device Providers
+
+    func openAddProvider(kind: LightProviderKind? = nil) {
+        editingProvider = nil
+        preselectedProviderKind = kind
+        showAddProviderSheet = true
+    }
+
+    func openEditProvider(_ connection: ProviderConnection) {
+        editingProvider = connection
+        preselectedProviderKind = connection.kind
+        showAddProviderSheet = true
+    }
+
+    func discoverProviders() {
+        multiClient?.discoverProviders()
+    }
+
+    @discardableResult
+    func saveProvider(_ connection: ProviderConnection, secret: String?) -> Result<Void, Error> {
+        guard let mc = multiClient else { return .failure(ProviderClientError.unsupported) }
+        do {
+            try mc.addProvider(connection, secret: secret)
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    func setProviderEnabled(id: String, enabled: Bool) {
+        multiClient?.setProviderEnabled(id: id, enabled: enabled)
+    }
+
+    func removeProvider(id: String) {
+        multiClient?.removeProvider(id: id)
+    }
+
+    func hasProviderSecret(for connectionID: String) -> Bool {
+        multiClient?.hasSecret(for: connectionID) ?? false
+    }
+
+    func testProvider(_ connection: ProviderConnection, secret: String?) async -> Result<String, Error> {
+        guard let mc = multiClient else { return .failure(ProviderClientError.unsupported) }
+        return await mc.testProvider(connection, secret: secret)
+    }
+
+    func pairNanoleaf(host: String, port: Int) async -> Result<String, Error> {
+        guard let mc = multiClient else { return .failure(ProviderClientError.unsupported) }
+        return await mc.pairNanoleaf(host: host, port: port)
+    }
+
+    func pairDirigera(host: String, port: Int) async -> Result<(token: String, certFingerprint: String), Error> {
+        guard let mc = multiClient else { return .failure(ProviderClientError.unsupported) }
+        return await mc.pairDirigera(host: host, port: port)
+    }
+
     func cancelPair() { client.cancelPair() }
 
     func unpair() {
@@ -1325,7 +1402,7 @@ final class HueStore: ObservableObject {
         } else {
             pos = (floorplan.snapped(floorplan.canvas.width / 2), floorplan.snapped(floorplan.canvas.height / 2))
         }
-        floorplan.lamps[lightID] = FloorplanLampPlacement(x: pos.0, y: pos.1, z: 0.0, icon: icon)
+        floorplan.lamps[lightID] = FloorplanLampPlacement(x: pos.0, y: pos.1, z: 0.0, icon: icon, floorID: floorplan.activeFloorID)
         persistFloorplan()
     }
 
@@ -1335,19 +1412,196 @@ final class HueStore: ObservableObject {
         client.renameLight(id: id, name: clean)
     }
 
-    func addFloorplanBox(kind: String, name: String, archetype: String, at x: Double, y: Double) {
+    func addFloorplanBox(
+        kind: String,
+        name: String,
+        archetype: String,
+        shape: FloorplanRoomShape = .rectangle,
+        at x: Double,
+        y: Double
+    ) {
+        let sx = floorplan.snapped(x)
+        let sy = floorplan.snapped(y)
+        let w: Double = kind == "zone" ? 340 : 320
+        let h: Double = kind == "zone" ? 200 : 240
         let box = FloorplanBox(
             kind: kind,
             hueID: nil,
             name: name,
             archetype: archetype,
-            x: floorplan.snapped(x),
-            y: floorplan.snapped(y),
-            width: kind == "zone" ? 340 : 320,
-            height: kind == "zone" ? 200 : 240
+            x: sx,
+            y: sy,
+            width: w,
+            height: h,
+            points: shape.makePoints(x: sx, y: sy, width: w, height: h),
+            floorID: floorplan.activeFloorID
         )
         floorplan.boxes.append(box)
         persistFloorplan()
+    }
+
+    // MARK: - Floorplan Studio v2 (Polygons, Multi-Floor, Gallery, Lighting Planner)
+
+    func selectFloor(_ floorID: String) {
+        guard floorplan.floors.contains(where: { $0.id == floorID }) else { return }
+        floorplan.activeFloorID = floorID
+        persistFloorplan()
+    }
+
+    func addFloor(name: String, level: Int? = nil) {
+        let nextLevel = level ?? ((floorplan.floors.map(\.level).max() ?? 0) + 1)
+        let baseID = nextLevel == 0 ? "eg" : (nextLevel > 0 ? "og\(nextLevel)" : "ug\(abs(nextLevel))")
+        var candidate = baseID
+        var suffix = 2
+        while floorplan.floors.contains(where: { $0.id == candidate }) {
+            candidate = "\(baseID)_\(suffix)"
+            suffix += 1
+        }
+        let floor = FloorplanFloor(id: candidate, name: name, level: nextLevel)
+        floorplan.floors.append(floor)
+        floorplan.floors.sort { $0.level < $1.level }
+        floorplan.activeFloorID = floor.id
+        persistFloorplan()
+    }
+
+    func renameFloor(id: String, name: String) {
+        guard let idx = floorplan.floors.firstIndex(where: { $0.id == id }) else { return }
+        let clean = HueColorMath.clean(name, limit: 32)
+        guard !clean.isEmpty else { return }
+        floorplan.floors[idx].name = clean
+        persistFloorplan()
+    }
+
+    func deleteFloor(id: String) {
+        guard floorplan.floors.count > 1,
+              let idx = floorplan.floors.firstIndex(where: { $0.id == id }) else { return }
+        floorplan.floors.remove(at: idx)
+        let fallback = floorplan.floors[0].id
+        floorplan.boxes.removeAll { $0.floorID == id }
+        floorplan.stamps.removeAll { $0.floorID == id }
+        floorplan.plannedLights.removeAll { $0.floorID == id }
+        for (lid, p) in floorplan.lamps where p.floorID == id {
+            var moved = p
+            moved.floorID = fallback
+            floorplan.lamps[lid] = moved
+        }
+        for (sid, p) in floorplan.sensors where p.floorID == id {
+            var moved = p
+            moved.floorID = fallback
+            floorplan.sensors[sid] = moved
+        }
+        if floorplan.activeFloorID == id {
+            floorplan.activeFloorID = fallback
+        }
+        persistFloorplan()
+    }
+
+    func applyGalleryPreset(id: String, includeSamplePlan: Bool) {
+        var doc: FloorplanDocument
+        if id == "bungalow_l_shape" {
+            doc = FloorplanTemplate.buildLShapedBungalow(snapshot: snapshot, bridgeID: currentBridgeID)
+        } else if let tpl = FloorplanTemplate(rawValue: id) {
+            doc = FloorplanTemplate.build(template: tpl, snapshot: snapshot, bridgeID: currentBridgeID)
+        } else {
+            doc = FloorplanTemplate.build(template: .threeRoomApartment, snapshot: snapshot, bridgeID: currentBridgeID)
+        }
+        if includeSamplePlan {
+            doc.plannedLights = FloorplanTemplate.samplePlannedLights(for: doc)
+        }
+        doc.autoSync = floorplan.autoSync
+        doc.background = floorplan.background
+        floorplan = doc
+        persistFloorplan()
+    }
+
+    func reshapeBox(id: String, shape: FloorplanRoomShape) {
+        guard let idx = floorplan.boxes.firstIndex(where: { $0.id == id }) else { return }
+        floorplan.boxes[idx] = floorplan.boxes[idx].applyingShape(shape)
+        persistFloorplan()
+    }
+
+    func moveBoxVertex(boxID: String, vertexIndex: Int, to point: FloorplanPoint, finalize: Bool) {
+        guard let idx = floorplan.boxes.firstIndex(where: { $0.id == boxID }) else { return }
+        let pt = finalize
+            ? FloorplanPoint(x: floorplan.snapped(point.x), y: floorplan.snapped(point.y))
+            : point
+        floorplan.boxes[idx] = floorplan.boxes[idx].movingVertex(at: vertexIndex, to: pt)
+        if finalize {
+            persistFloorplan()
+            triggerAutoSyncIfEnabled()
+        }
+    }
+
+    func insertBoxVertex(boxID: String, afterEdge edgeIndex: Int, at point: FloorplanPoint) {
+        guard let idx = floorplan.boxes.firstIndex(where: { $0.id == boxID }) else { return }
+        let pt = FloorplanPoint(x: floorplan.snapped(point.x), y: floorplan.snapped(point.y))
+        floorplan.boxes[idx] = floorplan.boxes[idx].insertingVertex(afterEdge: edgeIndex, at: pt)
+        persistFloorplan()
+    }
+
+    func removeBoxVertex(boxID: String, vertexIndex: Int) {
+        guard let idx = floorplan.boxes.firstIndex(where: { $0.id == boxID }) else { return }
+        floorplan.boxes[idx] = floorplan.boxes[idx].removingVertex(at: vertexIndex)
+        persistFloorplan()
+        triggerAutoSyncIfEnabled()
+    }
+
+    func addPlannedLight(preset: PlannedLightPreset, at center: FloorplanPoint) -> PlannedLight {
+        let sx = floorplan.snapped(center.x)
+        let sy = floorplan.snapped(center.y)
+        let strip: [FloorplanPoint]? = preset.isStrip
+            ? [FloorplanPoint(x: sx - 80, y: sy), FloorplanPoint(x: sx + 80, y: sy)]
+            : nil
+        let light = PlannedLight(
+            floorID: floorplan.activeFloorID,
+            name: tr(preset.titleKey),
+            icon: preset.icon,
+            x: sx,
+            y: sy,
+            stripPoints: strip,
+            lumens: preset.lumens,
+            beamRadius: preset.beamRadius,
+            kelvin: preset.kelvin,
+            on: true,
+            modelNote: "",
+            price: preset.defaultPrice
+        )
+        floorplan.plannedLights.append(light)
+        persistFloorplan()
+        return light
+    }
+
+    func updatePlannedLight(_ light: PlannedLight, finalize: Bool = true) {
+        guard let idx = floorplan.plannedLights.firstIndex(where: { $0.id == light.id }) else { return }
+        floorplan.plannedLights[idx] = light
+        if finalize { persistFloorplan() }
+    }
+
+    func togglePlannedLight(id: String) {
+        guard let idx = floorplan.plannedLights.firstIndex(where: { $0.id == id }) else { return }
+        floorplan.plannedLights[idx].on.toggle()
+        persistFloorplan()
+    }
+
+    func deletePlannedLight(id: String) {
+        floorplan.plannedLights.removeAll { $0.id == id }
+        persistFloorplan()
+    }
+
+    func bindPlannedLight(plannedID: String, toRealLightID realLightID: String) {
+        guard let idx = floorplan.plannedLights.firstIndex(where: { $0.id == plannedID }) else { return }
+        let planned = floorplan.plannedLights[idx]
+        let anchor = planned.anchorPoint
+        floorplan.lamps[realLightID] = FloorplanLampPlacement(
+            x: anchor.x,
+            y: anchor.y,
+            z: 0.0,
+            icon: planned.icon,
+            floorID: planned.floorID
+        )
+        floorplan.plannedLights.remove(at: idx)
+        persistFloorplan()
+        showTransientFloorplanStatus(tr("Bound planned fixture to real light"))
     }
 
     func updateFloorplanBox(
@@ -1423,7 +1677,8 @@ final class HueStore: ObservableObject {
         let stamp = FloorplanStamp(
             kind: kind,
             x: floorplan.snapped(x),
-            y: floorplan.snapped(y)
+            y: floorplan.snapped(y),
+            floorID: floorplan.activeFloorID
         )
         floorplan.stamps.append(stamp)
         persistFloorplan()
