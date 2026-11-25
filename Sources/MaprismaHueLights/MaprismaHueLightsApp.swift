@@ -28,27 +28,16 @@ enum MaprismaHueLightsEntrypoint {
 
 /// Maprisma Lights for macOS: a 100% pure-Swift, App Sandbox-compliant native macOS window app
 /// (freely movable, resizable, and compatible with tiling window managers) with a menu bar
-/// quick-toggle icon, Light Synthesizer, Light Themes, App Skins, global hotkeys, optional
-/// local-first Ask AI, native `--mcp` server, StoreKit 2 Pro unlock, and Apple Shortcuts (`AppIntents`).
+/// quick-toggle icon, Floorplan Studio v2, Light Synthesizer, Light Themes, App Skins, global
+/// hotkeys, optional local-first Ask AI, native `--mcp` server, and Apple Shortcuts (`AppIntents`).
 struct MaprismaHueLightsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var store = HueStore.shared
-    @StateObject private var proStore = ProStoreManager()
 
     var body: some Scene {
         Window("Maprisma Lights", id: "main-window") {
             ContentView(mode: .detached)
                 .environmentObject(store)
-                .environmentObject(proStore)
-                .task {
-                    let pro = proStore
-                    let hue = store
-                    hue.isProFeatureUnlocked = { [weak pro, weak hue] feature in
-                        guard let pro, let hue else { return false }
-                        return pro.isUnlocked(feature, isDemoMode: hue.isDemoMode)
-                    }
-                    pro.start()
-                }
         }
         .defaultSize(width: 840, height: 660)
         .windowResizability(.contentMinSize)

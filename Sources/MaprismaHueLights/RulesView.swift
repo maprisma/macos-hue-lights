@@ -5,7 +5,6 @@ import SwiftUI
 /// with global pause switch, cycle warning, sentence cards, and expandable activity log.
 struct RulesView: View {
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
     @State private var showActivityLog = false
 
     private var cycles: [[String]] {
@@ -13,22 +12,7 @@ struct RulesView: View {
     }
 
     var body: some View {
-        if !proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode) {
-            ProLockedOverlay(
-                feature: .rules,
-                symbol: "link",
-                accentHex: "#a855f7",
-                title: store.tr("Visual Rules & Sensors"),
-                description: store.tr("Link lamps, rooms, sensors, or Mac wake/sleep events visually with drag-to-connect Bezier wires and automatic loop protection."),
-                highlights: [
-                    store.tr("Follow / Mirror, Exclusive & Companion linked-light rules"),
-                    store.tr("Physical Hue motion, contact & switch sensors plus Bridge Pro MotionAware™"),
-                    store.tr("Mac wake, sleep & screen-lock automation triggers"),
-                ]
-            )
-        } else {
-            rulesBody
-        }
+        rulesBody
     }
 
     private var rulesBody: some View {

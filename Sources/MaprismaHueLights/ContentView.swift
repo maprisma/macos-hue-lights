@@ -7,7 +7,6 @@ struct ContentView: View {
     enum DisplayMode { case detached }
 
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
     @Environment(\.openWindow) private var openWindow
     var mode: DisplayMode = .detached
 
@@ -49,7 +48,7 @@ struct ContentView: View {
                 .preferredColorScheme(store.preferredColorScheme)
         }
         .sheet(isPresented: $store.showAskAISheet) {
-            if store.askAIEnabled && proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode) {
+            if store.askAIEnabled {
                 AskAIView()
                     .environmentObject(store)
                     .tint(store.skinAccentColor)
@@ -60,14 +59,6 @@ struct ContentView: View {
                     .frame(width: 1, height: 1)
                     .onAppear { store.showAskAISheet = false }
             }
-        }
-        .sheet(isPresented: $store.showProUpgradeSheet) {
-            ProUpgradeView()
-                .environmentObject(store)
-                .environmentObject(proStore)
-                .tint(store.skinAccentColor)
-                .fontDesign(store.fontDesign)
-                .preferredColorScheme(store.preferredColorScheme)
         }
         .sheet(isPresented: $store.showAddProviderSheet) {
             AddProviderSheet(editing: store.editingProvider, preselectedKind: store.preselectedProviderKind)
@@ -111,27 +102,8 @@ struct ContentView: View {
         .onAppear {
             AppDelegate.shared?.openMainWindowAction = { openWindow(id: "main-window") }
             store.setPanel(open: true)
-            proStore.start()
-            if proStore.hasVerifiedEntitlements {
-                store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
-            }
         }
         .onDisappear { store.setPanel(open: false) }
-        .onChange(of: proStore.hasVerifiedEntitlements) { verified in
-            if verified {
-                store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
-            }
-        }
-        .onChange(of: proStore.effectiveProUnlocked) { unlocked in
-            if proStore.hasVerifiedEntitlements {
-                store.enforceFreeAccessFallbacks(isProUnlocked: unlocked)
-            }
-        }
-        .onChange(of: store.snapshot.isDemo) { _ in
-            if proStore.hasVerifiedEntitlements {
-                store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
-            }
-        }
     }
 
     private func handleTryHelpFeature(_ feature: HelpFeature) {
@@ -158,7 +130,7 @@ struct ContentView: View {
         case .skins:
             store.page = .settings
         case .askAI:
-            if store.askAIEnabled && proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode) {
+            if store.askAIEnabled {
                 store.page = .main
                 store.showAskAISheet = true
             } else {
@@ -229,7 +201,6 @@ private struct WindowSizeModifier: ViewModifier {
 
 struct HeaderView: View {
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
     @Environment(\.openWindow) private var openWindow
     let mode: ContentView.DisplayMode
 
@@ -255,13 +226,6 @@ struct HeaderView: View {
                             } label: {
                                 Label(store.tr("Connect Bridge"), systemImage: "wifi.router")
                             }
-                            if !proStore.effectiveProUnlocked {
-                                Button {
-                                    store.showProUpgradeSheet = true
-                                } label: {
-                                    Label(store.tr("Unlock Pro"), systemImage: "crown.fill")
-                                }
-                            }
                         } label: {
                             HStack(spacing: 3) {
                                 Text(store.tr("Demo"))
@@ -277,7 +241,7 @@ struct HeaderView: View {
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()
-                        .help(store.tr("Demo Mode (All Pro features preview)"))
+                        .help(store.tr("Demo Mode"))
                     }
                 }
                 Text(s.isPaired ? (s.bridge?.text ?? "Hue Bridge") : store.tr("No bridge paired"))
@@ -295,7 +259,7 @@ struct HeaderView: View {
                     .padding(.vertical, 3)
                     .background(Capsule().fill(Color.primary.opacity(0.08)))
             }
-            if store.askAIEnabled && proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode) {
+            if store.askAIEnabled {
                 Button {
                     store.showAskAISheet = true
                 } label: {
@@ -340,24 +304,20 @@ struct HeaderView: View {
 
 struct TabBarView: View {
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
 
     var body: some View {
-        let mapLocked = !proStore.isUnlocked(.floorplan, isDemoMode: store.isDemoMode)
-        let rulesLocked = !proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode)
-        let synthLocked = !proStore.isUnlocked(.audioSynth, isDemoMode: store.isDemoMode)
         GeometryReader { geo in
             let compact = geo.size.width < 520
             HStack(spacing: compact ? 2 : 4) {
-                tabButton(.lights, title: store.tr("Lights"), symbol: "lightbulb", badge: nil, activeDot: false, locked: false, compact: compact)
+                tabButton(.lights, title: store.tr("Lights"), symbol: "lightbulb", badge: nil, activeDot: false, compact: compact)
                 tabButton(.map, title: store.tr("Map"), symbol: "map", badge: nil,
-                          activeDot: !mapLocked && store.pendingFloorplanSyncPlan.hasRoomOrMetaChanges, locked: mapLocked, compact: compact)
+                          activeDot: store.pendingFloorplanSyncPlan.hasRoomOrMetaChanges, compact: compact)
                 tabButton(.schedules, title: store.tr("Schedules"), symbol: "clock",
-                          badge: store.allSchedules.isEmpty ? nil : store.allSchedules.count, activeDot: false, locked: false, compact: compact)
+                          badge: store.allSchedules.isEmpty ? nil : store.allSchedules.count, activeDot: false, compact: compact)
                 tabButton(.rules, title: store.tr("Rules"), symbol: "link",
-                          badge: (rulesLocked || store.rules.isEmpty) ? nil : store.rules.count, activeDot: false, locked: rulesLocked, compact: compact)
+                          badge: store.rules.isEmpty ? nil : store.rules.count, activeDot: false, compact: compact)
                 tabButton(.synth, title: store.tr("Synth"), symbol: "waveform", badge: nil,
-                          activeDot: !synthLocked && store.synthRunning, locked: synthLocked, compact: compact)
+                          activeDot: store.synthRunning, compact: compact)
             }
             .padding(3)
             .background(
@@ -372,7 +332,7 @@ struct TabBarView: View {
         .frame(height: 32)
     }
 
-    private func tabButton(_ tab: HueStore.MainTab, title: String, symbol: String, badge: Int?, activeDot: Bool, locked: Bool, compact: Bool) -> some View {
+    private func tabButton(_ tab: HueStore.MainTab, title: String, symbol: String, badge: Int?, activeDot: Bool, compact: Bool) -> some View {
         let selected = store.tab == tab
         return Button {
             withAnimation(.easeInOut(duration: 0.15)) { store.tab = tab }
@@ -386,11 +346,7 @@ struct TabBarView: View {
                     .font(store.scaledFont(compact ? 11 : 11.5, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                if locked {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
-                } else if let badge = badge {
+                if let badge = badge {
                     Text("\(badge)")
                         .font(store.scaledFont(9.5, weight: .medium).monospacedDigit())
                         .padding(.horizontal, 4.5)

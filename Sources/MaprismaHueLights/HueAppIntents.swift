@@ -91,15 +91,8 @@ struct ToggleSynthIntent: AppIntent {
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let outcome = await HueStore.shared.toggleSynthFromIntent()
-        switch outcome {
-        case .started:
-            return .result(dialog: "Started the Light Synthesizer.")
-        case .stopped:
-            return .result(dialog: "Stopped the Light Synthesizer.")
-        case .requiresPro:
-            return .result(dialog: "Light Synthesizer requires Maprisma Lights Pro.")
-        }
+        let running = await HueStore.shared.toggleSynthFromIntent()
+        return .result(dialog: running ? "Started the Light Synthesizer." : "Stopped the Light Synthesizer.")
     }
 }
 

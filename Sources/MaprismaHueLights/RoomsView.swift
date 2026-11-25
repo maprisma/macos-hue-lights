@@ -260,7 +260,6 @@ private struct FilterBar: View {
 
 struct RoomCard: View {
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
     let room: HueRoom
 
     private var tint: Color? { room.on ? Color(hex: room.color) : nil }
@@ -327,13 +326,8 @@ struct RoomCard: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 if let area = motionArea, area.enabled {
-                                    let maUnlocked = proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode)
                                     Button {
-                                        if maUnlocked {
-                                            store.updateMotionArea(area, enabled: !area.enabled)
-                                        } else {
-                                            store.showProUpgradeSheet = true
-                                        }
+                                        store.updateMotionArea(area, enabled: !area.enabled)
                                     } label: {
                                         HStack(spacing: 3) {
                                             Image(systemName: "dot.radiowaves.left.and.right")
@@ -383,19 +377,8 @@ struct RoomCard: View {
                     }
                     if let area = motionArea {
                         Divider()
-                        let maUnlocked = proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode)
-                        Button {
-                            if maUnlocked {
-                                store.updateMotionArea(area, enabled: !area.enabled)
-                            } else {
-                                store.showProUpgradeSheet = true
-                            }
-                        } label: {
-                            if maUnlocked {
-                                Text(area.enabled ? store.tr("Disable MotionAware™") : store.tr("Enable MotionAware™"))
-                            } else {
-                                Label(area.enabled ? store.tr("Disable MotionAware™") : store.tr("Enable MotionAware™"), systemImage: "lock.fill")
-                            }
+                        Button(area.enabled ? store.tr("Disable MotionAware™") : store.tr("Enable MotionAware™")) {
+                            store.updateMotionArea(area, enabled: !area.enabled)
                         }
                     }
                     if !room.hueID.isEmpty {
@@ -403,19 +386,8 @@ struct RoomCard: View {
                         Button(store.tr("Schedule this room …")) {
                             store.openScheduleFor(kind: "room", id: room.id)
                         }
-                        let rulesUnlocked = proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode)
-                        Button {
-                            if rulesUnlocked {
-                                store.openRuleFor(kind: "room", id: room.id)
-                            } else {
-                                store.showProUpgradeSheet = true
-                            }
-                        } label: {
-                            if rulesUnlocked {
-                                Text(store.tr("Link with another light …"))
-                            } else {
-                                Label(store.tr("Link with another light …"), systemImage: "lock.fill")
-                            }
+                        Button(store.tr("Link with another light …")) {
+                            store.openRuleFor(kind: "room", id: room.id)
                         }
                     }
                 } label: {
@@ -523,7 +495,6 @@ struct BrightnessSlider: View {
 /// MotionAware™ area has been calibrated yet. Stays 100% hidden on Bridge v2 or once an area exists.
 struct MotionAwareSetupHintBanner: View {
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
 
     var body: some View {
         if store.shouldShowMotionAwareSetupHint {
@@ -570,20 +541,6 @@ struct MotionAwareSetupHintBanner: View {
                 .font(store.scaledFont(10.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-                if !proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode) {
-                    HStack(spacing: 8) {
-                        Button {
-                            store.showProUpgradeSheet = true
-                        } label: {
-                            Label(store.tr("Unlock Pro"), systemImage: "crown.fill")
-                                .font(store.scaledFont(10.5, weight: .semibold))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.mini)
-                    }
-                    .padding(.top, 2)
-                }
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -601,7 +558,6 @@ struct MotionAwareSetupHintBanner: View {
 
 struct LightRow: View {
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
     let light: HueLight
     @State private var showColorPopover = false
     @State private var activeLampDialog: LampDialogSheet? = nil
@@ -693,19 +649,8 @@ struct LightRow: View {
                     store.themeEditorLight = light
                 }
                 Divider()
-                let rulesUnlocked = proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode)
-                Button {
-                    if rulesUnlocked {
-                        store.openMapInRulesMode(wiringLightID: light.id)
-                    } else {
-                        store.showProUpgradeSheet = true
-                    }
-                } label: {
-                    if rulesUnlocked {
-                        Text(store.tr("Wire rule on Map"))
-                    } else {
-                        Label(store.tr("Wire rule on Map"), systemImage: "lock.fill")
-                    }
+                Button(store.tr("Wire rule on Map")) {
+                    store.openMapInRulesMode(wiringLightID: light.id)
                 }
                 Button(store.tr("Schedule this light …")) {
                     store.openScheduleFor(kind: "light", id: light.id)

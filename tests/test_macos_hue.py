@@ -746,128 +746,32 @@ class SwiftAppTests(unittest.TestCase):
         self.assertIn("struct LampIconPickerSheet: View", map_view)
         self.assertIn("func openMapInRulesMode(wiringLightID: String? = nil)", store)
 
-    def test_pro_access_storekit2_and_paywall_contract(self):
-        pro_access = read("Sources", "HueCore", "ProAccess.swift")
-        for needle in (
-            "public enum AppAccessMode: String, Codable, Sendable, Equatable",
-            "public enum ProFeature: String, CaseIterable, Identifiable, Sendable",
-            "case floorplan",
-            "case rules",
-            "case motionAware",
-            "case audioSynth",
-            "case skins",
-            "case askAI",
-            "public struct ProAccessPolicy: Sendable",
-            'public static let proProductID = "com.maprisma.lights.pro"',
-            "public static func mode(isProUnlocked: Bool, isDemoMode: Bool) -> AppAccessMode",
-            "public static func isUnlocked(_ feature: ProFeature, isProUnlocked: Bool, isDemoMode: Bool) -> Bool",
-            "public static func isSkinFree(_ skin: String) -> Bool",
+    def test_free_all_features_unlocked_and_sandbox_contract(self):
+        # Pro paywall, StoreKit 2, and feature locks have been completely removed — all features are free.
+        for removed in (
+            os.path.join(ROOT, "Sources", "HueCore", "ProAccess.swift"),
+            os.path.join(ROOT, "Sources", "MaprismaHueLights", "ProStoreManager.swift"),
+            os.path.join(ROOT, "Sources", "MaprismaHueLights", "ProUpgradeView.swift"),
+            os.path.join(ROOT, "MacAppStore", "MaprismaHueLights.storekit"),
         ):
-            self.assertIn(needle, pro_access)
-        # A6: MCP server is free and not listed as a Pro feature
-        self.assertNotIn("case mcp", pro_access)
+            self.assertFalse(os.path.exists(removed), removed)
 
-        pro_manager = read("Sources", "MaprismaHueLights", "ProStoreManager.swift")
-        for needle in (
-            "import StoreKit",
-            "@MainActor",
-            "final class ProStoreManager: ObservableObject",
-            "Transaction.currentEntitlements",
-            "Transaction.updates",
-            "AppStore.sync()",
-            "effectiveProUnlocked",
-            "debugOverridePro",
-            "formattedPrice",
-            "isProductLoaded",
-            "purchasePro()",
-            "restorePurchases()",
-            "ProAccessPolicy.proProductID",
-            "revocationDate == nil",
-        ):
-            self.assertIn(needle, pro_manager)
-        self.assertNotIn("@Observable", pro_manager)
-        # A7: No hard-coded fallback price
-        self.assertNotIn('"€9.99"', pro_manager)
-
-        pro_view = read("Sources", "MaprismaHueLights", "ProUpgradeView.swift")
-        for needle in (
-            "struct ProUpgradeView: View",
-            "struct ProLockedOverlay: View",
-            "struct ProFeatureGateBanner: View",
-            "Maprisma Lights Pro",
-            "One-time purchase · No subscription",
-            "Restore Purchases",
-            "Try free in Demo Mode",
-            "Try in Demo Mode",
-            "Optional local-first Ask AI",
-            "Loading price…",
-        ):
-            self.assertIn(needle, pro_view)
-        self.assertNotIn("Maprisma Hue Lights Pro", pro_view)
-
-        # A1 & A4: Entitlements and local networking ATS in both project.yml and build-mac.sh
+        # Entitlements and local networking ATS remain intact in both project.yml and build-mac.sh
         ent = read("MacAppStore", "MaprismaHueLights.entitlements")
         self.assertIn("com.apple.security.files.user-selected.read-only", ent)
         self.assertIn("com.apple.security.network.server", ent)
         proj = read("MacAppStore", "project.yml")
         self.assertIn("NSAllowsLocalNetworking: true", proj)
+        self.assertNotIn("MaprismaHueLights.storekit", proj)
         bsh = read("build-mac.sh")
         self.assertIn("<key>NSAllowsLocalNetworking</key>", bsh)
-        sk = read("MacAppStore", "MaprismaHueLights.storekit")
-        self.assertIn("Maprisma Lights Pro", sk)
-        self.assertNotIn("Maprisma Hue Lights Pro", sk)
 
-        app = read("Sources", "MaprismaHueLights", "MaprismaHueLightsApp.swift")
-        self.assertIn("@StateObject private var proStore = ProStoreManager()", app)
-        self.assertIn(".environmentObject(proStore)", app)
-
-        content = read("Sources", "MaprismaHueLights", "ContentView.swift")
-        self.assertIn("ProUpgradeView()", content)
-        self.assertIn("proStore.start()", content)
-        self.assertIn("Connect Bridge", content)
-
-        settings_view = read("Sources", "MaprismaHueLights", "SettingsView.swift")
-        for needle in (
-            "Pro / License",
-            "Pro — Unlocked",
-            "Demo Mode (All Pro features preview)",
-            "Free — Rooms & Lights",
-            "Unlock Pro…",
-            "Restore Purchases",
-            "StoreKit Live",
-            "Simulate Free",
-            "Simulate Pro",
-            "isSkinUnlocked",
-        ):
-            self.assertIn(needle, settings_view)
-
-        for view_name, feature_token in (
-            ("MapView.swift", ".floorplan"),
-            ("RulesView.swift", ".rules"),
-            ("SynthView.swift", ".audioSynth"),
-        ):
+        for view_name in ("MaprismaHueLightsApp.swift", "ContentView.swift", "SettingsView.swift", "MapView.swift", "RulesView.swift", "SynthView.swift", "RoomsView.swift"):
             view_src = read("Sources", "MaprismaHueLights", view_name)
-            self.assertIn("ProLockedOverlay(", view_src, view_name)
-            self.assertIn(feature_token, view_src, view_name)
-
-        rooms_view = read("Sources", "MaprismaHueLights", "RoomsView.swift")
-        self.assertIn("proStore.isUnlocked(.motionAware", rooms_view)
-        self.assertIn("proStore.isUnlocked(.rules", rooms_view)
-
-        storekit_raw = read("MacAppStore", "MaprismaHueLights.storekit")
-        storekit = json.loads(storekit_raw)
-        self.assertIn("products", storekit)
-        self.assertEqual(len(storekit["products"]), 1)
-        prod = storekit["products"][0]
-        self.assertEqual(prod["productID"], "com.maprisma.lights.pro")
-        self.assertEqual(prod["type"], "NonConsumable")
-        self.assertEqual(prod["displayPrice"], "9.99")
-        locales = {loc["locale"] for loc in prod["localizations"]}
-        self.assertTrue({"en_US", "de_DE"}.issubset(locales))
-
-        launch_kit = read("MacAppStore", "LAUNCH-KIT.md")
-        self.assertIn("com.maprisma.lights.pro", launch_kit)
-        self.assertIn("MaprismaHueLights.storekit", launch_kit)
+            self.assertNotIn("ProStoreManager", view_src, view_name)
+            self.assertNotIn("ProLockedOverlay", view_src, view_name)
+            self.assertNotIn("ProUpgradeView", view_src, view_name)
+            self.assertNotIn("showProUpgradeSheet", view_src, view_name)
 
     def test_build_and_install_scripts(self):
         for name in ("build-mac.sh", "install-mac.sh"):

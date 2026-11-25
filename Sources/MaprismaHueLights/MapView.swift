@@ -56,7 +56,6 @@ struct MapView: View {
     }
 
     @EnvironmentObject var store: HueStore
-    @EnvironmentObject var proStore: ProStoreManager
 
     @State private var mode: MapMode = .map
     @State private var sidebarOpen: Bool = true
@@ -101,22 +100,7 @@ struct MapView: View {
     }
 
     var body: some View {
-        if !proStore.isUnlocked(.floorplan, isDemoMode: store.isDemoMode) {
-            ProLockedOverlay(
-                feature: .floorplan,
-                symbol: "map.fill",
-                accentHex: "#38bdf8",
-                title: store.tr("Visual Floorplan Studio"),
-                description: store.tr("Arrange rooms, zones, furniture, and glowing lamps on an interactive 2D map, or place your own floorplan image behind them."),
-                highlights: [
-                    store.tr("6 editable apartment & house prototypes plus custom background images"),
-                    store.tr("12 custom lamp icons, inline scenes & 1-click Hue Bridge sync"),
-                    store.tr("Drag-to-connect visual rule wires & Hue sensors"),
-                ]
-            )
-        } else {
-            mapStudioBody
-        }
+        mapStudioBody
     }
 
     private var mapStudioBody: some View {

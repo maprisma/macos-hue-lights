@@ -64,7 +64,6 @@ final class HueStore: ObservableObject {
     @Published var rulePrefillTrigger: (kind: String, id: String)?
     @Published var themeEditorLight: HueLight?
     @Published var showAskAISheet: Bool = false
-    @Published var showProUpgradeSheet: Bool = false
     @Published var showAddProviderSheet: Bool = false
     @Published var editingProvider: ProviderConnection? = nil
     @Published var preselectedProviderKind: LightProviderKind? = nil
@@ -283,28 +282,6 @@ final class HueStore: ObservableObject {
         multi.start()
         page = .main
         tab = .lights
-    }
-
-    /// Closure injected by `MaprismaHueLightsApp` / `ProStoreManager` so hotkeys & AppIntents respect Pro gating.
-    var isProFeatureUnlocked: ((ProFeature) -> Bool)?
-
-    func persistLastVerifiedPro(_ unlocked: Bool) {
-        try? settings.setLastVerifiedPro(unlocked)
-    }
-
-    /// Ensures Free mode on a real smart-lighting setup falls back cleanly to the free native skin
-    /// and stops Pro-only live sessions (e.g. after leaving Demo Mode without a Pro unlock).
-    func enforceFreeAccessFallbacks(isProUnlocked: Bool) {
-        guard !isProUnlocked && !isDemoMode else { return }
-        if !ProAccessPolicy.isSkinFree(skin) {
-            setSkin(.system)
-        }
-        if synthRunning {
-            stopSynth()
-        }
-        if showAskAISheet {
-            showAskAISheet = false
-        }
     }
 
     // MARK: - Texts & Localization
@@ -535,14 +512,7 @@ final class HueStore: ObservableObject {
         case .allOn:
             allOn(confirmed: true)
         case .toggleSynth:
-            if synthRunning {
-                stopSynth()
-            } else if isProFeatureUnlocked?(.audioSynth) ?? isDemoMode {
-                startSynth()
-            } else {
-                AppDelegate.shared?.showMainWindow()
-                showProUpgradeSheet = true
-            }
+            toggleSynth()
         case .toggleFavorite:
             togglePrimaryFavoriteOrFirstRoom()
         }
@@ -647,18 +617,12 @@ final class HueStore: ObservableObject {
         }
     }
 
-    enum SynthIntentOutcome { case started, stopped, requiresPro }
-
-    func toggleSynthFromIntent() async -> SynthIntentOutcome {
+    func toggleSynthFromIntent() async -> Bool {
         if synthRunning {
             stopSynth()
-            return .stopped
+            return false
         }
-        guard isProFeatureUnlocked?(.audioSynth) ?? isDemoMode else {
-            return .requiresPro
-        }
-        let started = await startSynthAsync()
-        return started ? .started : .stopped
+        return await startSynthAsync()
     }
 
     func startSynth() {

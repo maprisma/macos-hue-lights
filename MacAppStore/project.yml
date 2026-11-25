@@ -17,8 +17,6 @@ targets:
     sources:
       - path: ../Sources/MaprismaHueLights
       - path: Assets.xcassets
-      - path: MaprismaHueLights.storekit
-        buildPhase: none
       - path: PrivacyInfo.xcprivacy
         buildPhase: resources
       - path: ../translations
@@ -40,8 +38,6 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         SWIFT_VERSION: "5.9"
         COMBINE_HIDPI_IMAGES: YES
-    scheme:
-      storeKitConfiguration: MaprismaHueLights.storekit
     info:
       path: Info-MAS.plist
       properties:
