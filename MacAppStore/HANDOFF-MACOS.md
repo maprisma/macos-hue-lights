@@ -1,6 +1,6 @@
 # AGY Handoff — Continuing Maprisma Lights on macOS
 
-This file gives **Antigravity (AGY) on macOS** full context to compile-verify, polish, capture screenshots, archive in Xcode, and ship **Maprisma Lights** (`com.maprisma.lights`, **$4.99 / €4.99** one-time purchase) to the **Mac App Store**.
+This file gives **Antigravity (AGY) on macOS** full context to compile-verify, polish, capture screenshots, archive in Xcode, and ship **Maprisma Lights** (`com.maprisma.lights`, **Free download + €9.99 / $9.99 one-time Pro unlock**, launch offer **€7.99 / $7.99**) to the **Mac App Store**.
 
 > **Warning on Git Remotes:** Push to your **private** repo (`origin` = `uBruckhaus/macos-hue-lights`). Do **not** push the paid Mac App Store release publicly — before launch, make `maprisma/macos-hue-lights` private and remove the free macOS download from `maprisma.com`.
 
@@ -25,7 +25,7 @@ Everything in `Sources/` was rewritten to **100% pure Swift 5.9+ (macOS 13+, App
   - `GlobalHotKeyManager.swift` — Carbon `RegisterEventHotKey` (sandbox-safe, zero Accessibility permission).
   - `HueAppIntents.swift` — Apple Shortcuts & Siri (`AppIntents` + `AppShortcutsProvider`).
 - **Mac App Store Files (`MacAppStore/`):**
-  - `MaprismaHueLights.entitlements` (`com.apple.security.app-sandbox`, `com.apple.security.network.client`, `com.apple.security.device.audio-input`)
+  - `MaprismaHueLights.entitlements` (`com.apple.security.app-sandbox`, `com.apple.security.network.client`, `com.apple.security.network.server` for Govee LAN UDP port 4002 replies, `com.apple.security.files.user-selected.read-only` for floorplan background image import via `NSOpenPanel`, `com.apple.security.device.audio-input` for optional microphone Light Synth)
   - `PrivacyInfo.xcprivacy` (zero tracking / data collection)
   - `Assets.xcassets/AppIcon.appiconset/` (all 10 PNG sizes 16–1024 + `Contents.json`, rendered from `AppIcon.svg`)
   - `project.yml` (XcodeGen spec for `com.maprisma.lights`)

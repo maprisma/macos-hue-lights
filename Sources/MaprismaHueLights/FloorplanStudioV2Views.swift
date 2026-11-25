@@ -43,6 +43,8 @@ struct FloorTabsBar: View {
     @State private var showAddFloorPopover: Bool = false
     @State private var newFloorName: String = ""
     @State private var newFloorLevel: Int = 1
+    @State private var renamingFloorID: String? = nil
+    @State private var renameFloorDraft: String = ""
 
     var body: some View {
         HStack(spacing: 6) {
@@ -77,7 +79,38 @@ struct FloorTabsBar: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .popover(isPresented: Binding(
+                            get: { renamingFloorID == floor.id },
+                            set: { if !$0 && renamingFloorID == floor.id { renamingFloorID = nil } }
+                        ), arrowEdge: .bottom) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(store.tr("Rename Floor"))
+                                    .font(store.scaledFont(12, weight: .semibold))
+                                TextField(store.tr("Floor name"), text: $renameFloorDraft)
+                                    .textFieldStyle(.roundedBorder)
+                                    .controlSize(.small)
+                                    .onSubmit {
+                                        store.renameFloor(id: floor.id, name: renameFloorDraft)
+                                        renamingFloorID = nil
+                                    }
+                                HStack {
+                                    Spacer()
+                                    Button(store.tr("Save")) {
+                                        store.renameFloor(id: floor.id, name: renameFloorDraft)
+                                        renamingFloorID = nil
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                }
+                            }
+                            .padding(10)
+                            .frame(width: 210)
+                        }
                         .contextMenu {
+                            Button(store.tr("Rename Floor…")) {
+                                renameFloorDraft = floor.name
+                                renamingFloorID = floor.id
+                            }
                             if store.floorplan.floors.count > 1 {
                                 Button(store.tr("Delete Floor"), role: .destructive) {
                                     store.deleteFloor(id: floor.id)
@@ -135,6 +168,18 @@ struct FloorTabsBar: View {
 
             Spacer(minLength: 4)
 
+            if store.lastUndoFloorplan != nil {
+                Button {
+                    store.undoLastFloorplanChange()
+                    onFloorSwitched()
+                } label: {
+                    Label(store.tr("Undo"), systemImage: "arrow.uturn.backward")
+                        .font(store.scaledFont(10.5, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+
             // Ambient Light Simulation (Day / Dusk / Night)
             Picker("", selection: $ambientMode) {
                 ForEach(FloorplanAmbientMode.allCases) { m in
@@ -187,6 +232,7 @@ struct FloorplanGallerySheet: View {
     let onApplied: () -> Void
 
     @State private var includeSamplePlan: Bool = false
+    @State private var confirmReplaceID: String? = nil
 
     private var entries: [GalleryEntry] {
         let emptySnap = HueSnapshot(phase: "ok")
@@ -275,10 +321,16 @@ struct FloorplanGallerySheet: View {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                     ForEach(entries) { entry in
                         let isCurrent = store.floorplan.templateID == entry.id
+                        let needsConfirm = !store.floorplan.boxes.isEmpty
                         Button {
-                            store.applyGalleryPreset(id: entry.id, includeSamplePlan: includeSamplePlan)
-                            onApplied()
-                            dismiss()
+                            if needsConfirm && confirmReplaceID != entry.id {
+                                confirmReplaceID = entry.id
+                            } else {
+                                confirmReplaceID = nil
+                                store.applyGalleryPreset(id: entry.id, includeSamplePlan: includeSamplePlan)
+                                onApplied()
+                                dismiss()
+                            }
                         } label: {
                             VStack(alignment: .leading, spacing: 8) {
                                 FloorplanThumbnailCanvas(doc: entry.previewDoc, accent: store.skinAccentColor)
@@ -289,13 +341,13 @@ struct FloorplanGallerySheet: View {
                                     )
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .strokeBorder(isCurrent ? store.skinAccentColor : Color.primary.opacity(0.12), lineWidth: isCurrent ? 1.8 : 0.8)
+                                            .strokeBorder(confirmReplaceID == entry.id ? Color.orange : (isCurrent ? store.skinAccentColor : Color.primary.opacity(0.12)), lineWidth: (isCurrent || confirmReplaceID == entry.id) ? 1.8 : 0.8)
                                     )
 
                                 HStack(spacing: 5) {
-                                    Text(store.tr(entry.titleKey))
+                                    Text(confirmReplaceID == entry.id ? store.tr("Click again to replace map") : store.tr(entry.titleKey))
                                         .font(store.scaledFont(12, weight: .semibold))
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(confirmReplaceID == entry.id ? Color.orange : Color.primary)
                                         .lineLimit(1)
                                     Spacer()
                                     Text(store.tr(entry.badgeKey))

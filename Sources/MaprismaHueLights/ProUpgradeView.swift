@@ -50,7 +50,7 @@ struct ProUpgradeView: View {
                 id: "askAI",
                 symbol: "sparkles",
                 tint: Color(hex: "#10b981"),
-                title: store.tr("Optional local-first Ask AI & local MCP server")
+                title: store.tr("Optional local-first Ask AI")
             ),
         ]
     }
@@ -75,7 +75,7 @@ struct ProUpgradeView: View {
                 .frame(width: 44, height: 44)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(store.tr("Maprisma Hue Lights Pro"))
+                    Text(store.tr("Maprisma Lights Pro"))
                         .font(store.scaledFont(15, weight: .bold))
                     Text(store.tr("One-time purchase · No subscription"))
                         .font(store.scaledFont(11.5))
@@ -179,18 +179,23 @@ struct ProUpgradeView: View {
                         Task { await proStore.purchasePro() }
                     } label: {
                         HStack(spacing: 8) {
-                            if proStore.isPurchasing {
+                            if proStore.isPurchasing || proStore.isLoading || !proStore.isProductLoaded {
                                 ProgressView()
                                     .controlSize(.small)
                             }
-                            Text(store.trf("Unlock Pro — {0}", [proStore.formattedPrice]))
-                                .font(store.scaledFont(13, weight: .semibold))
+                            if let price = proStore.formattedPrice {
+                                Text(store.trf("Unlock Pro — {0}", [price]))
+                                    .font(store.scaledFont(13, weight: .semibold))
+                            } else {
+                                Text(store.tr("Loading price…"))
+                                    .font(store.scaledFont(13, weight: .semibold))
+                            }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(proStore.isPurchasing)
+                    .disabled(proStore.isPurchasing || !proStore.isProductLoaded)
                 }
 
                 HStack(spacing: 8) {

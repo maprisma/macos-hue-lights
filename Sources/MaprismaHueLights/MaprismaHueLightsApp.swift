@@ -6,8 +6,7 @@ import SwiftUI
 
 /// Entrypoint that cleanly branches into the headless `--mcp` stdio JSON-RPC 2.0 server
 /// BEFORE SwiftUI / `NSApplication` starts, so AI agent invocations never open a window or steal focus.
-/// `--demo --mcp` is always free to test; on a real Philips Hue Bridge, MCP is part of Maprisma Hue Lights Pro
-/// (headless CLI invocation never crashes even if StoreKit is unavailable in ad-hoc builds).
+/// Both `--demo --mcp` and local `--mcp` are free to use (never gated on StoreKit).
 @main
 enum MaprismaHueLightsEntrypoint {
     @MainActor

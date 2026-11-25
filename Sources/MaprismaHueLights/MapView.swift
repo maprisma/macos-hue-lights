@@ -399,11 +399,13 @@ struct MapView: View {
                             set: { store.floorplan.showFurniture = $0; store.persistFloorplan() }
                         ))
                         Toggle(store.tr("Synth overlay"), isOn: $showSynthOverlay)
-                        Divider()
-                        Toggle(store.tr("Auto-sync to Bridge"), isOn: Binding(
-                            get: { store.floorplan.autoSync },
-                            set: { store.setFloorplanAutoSync($0) }
-                        ))
+                        if store.snapshot.hueBridgePaired || store.snapshot.isDemo {
+                            Divider()
+                            Toggle(store.tr("Auto-sync to Bridge"), isOn: Binding(
+                                get: { store.floorplan.autoSync },
+                                set: { store.setFloorplanAutoSync($0) }
+                            ))
+                        }
                     } label: {
                         Label(store.tr("View"), systemImage: "eye")
                             .font(store.scaledFont(11, weight: .medium))
@@ -411,33 +413,35 @@ struct MapView: View {
                     .menuStyle(.borderedButton)
                     .controlSize(.small)
 
-                    // 6. Sync All button with pending count badge
-                    let pending = store.pendingFloorplanSyncPlan
-                    Button {
-                        store.syncAllFloorplanToBridge()
-                    } label: {
-                        HStack(spacing: 4) {
-                            if store.floorplanSyncing {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                            }
-                            Text(store.tr("Sync All"))
-                                .font(store.scaledFont(11, weight: .semibold))
-                            if pending.totalChanges > 0 {
-                                Text("\(pending.totalChanges)")
-                                    .font(store.scaledFont(9.5, weight: .bold).monospacedDigit())
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Capsule().fill(Color.white.opacity(0.28)))
+                    // 6. Sync All button with pending count badge (only when a Hue Bridge or Demo is active)
+                    if store.snapshot.hueBridgePaired || store.snapshot.isDemo {
+                        let pending = store.pendingFloorplanSyncPlan
+                        Button {
+                            store.syncAllFloorplanToBridge()
+                        } label: {
+                            HStack(spacing: 4) {
+                                if store.floorplanSyncing {
+                                    ProgressView().controlSize(.mini)
+                                } else {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                }
+                                Text(store.tr("Sync All"))
+                                    .font(store.scaledFont(11, weight: .semibold))
+                                if pending.totalChanges > 0 {
+                                    Text("\(pending.totalChanges)")
+                                        .font(store.scaledFont(9.5, weight: .bold).monospacedDigit())
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.white.opacity(0.28)))
+                                }
                             }
                         }
+                        .buttonStyle(.borderedProminent)
+                        .tint(pending.hasRoomOrMetaChanges ? store.skinAccentColor : Color.secondary.opacity(0.5))
+                        .controlSize(.small)
+                        .disabled(store.floorplanSyncing)
+                        .help(store.tr("Sync All to Bridge"))
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(pending.hasRoomOrMetaChanges ? store.skinAccentColor : Color.secondary.opacity(0.5))
-                    .controlSize(.small)
-                    .disabled(store.floorplanSyncing)
-                    .help(store.tr("Sync All to Bridge"))
                 }
 
                 // 7. Compact Zoom (-, Fit, +) + optional Open-in-window
@@ -701,6 +705,11 @@ struct MapView: View {
                     Button(store.tr("Lamp icon…")) {
                         activeLampDialog = .icon(light.id)
                     }
+                    if let p = store.floorplan.lamps[light.id], p.floorID != store.floorplan.activeFloorID {
+                        Button(store.tr("Move to this floor")) {
+                            store.moveLampToActiveFloor(light.id)
+                        }
+                    }
                     Divider()
                     Button(store.tr("Wire from here")) {
                         mode = .rules
@@ -728,6 +737,11 @@ struct MapView: View {
                     }
                     Button(store.tr("Lamp icon…")) {
                         activeLampDialog = .icon(light.id)
+                    }
+                    if let p = store.floorplan.lamps[light.id], p.floorID != store.floorplan.activeFloorID {
+                        Button(store.tr("Move to this floor")) {
+                            store.moveLampToActiveFloor(light.id)
+                        }
                     }
                 }
             } label: {
@@ -1121,11 +1135,13 @@ struct MapView: View {
                             Text(store.tr("Plan Mode: place future fixtures & LED strips, drag corners to reshape rooms, and toggle Day/Dusk/Night."))
                                 .font(store.scaledFont(10.5, weight: .medium))
                                 .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                                .multilineTextAlignment(.center)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 5)
-                                .background(Capsule().fill(.ultraThinMaterial))
-                                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+                                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.ultraThinMaterial))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
                                 .allowsHitTesting(false)
                                 .padding(.top, 10)
                                 .padding(.horizontal, 12)
@@ -1917,7 +1933,7 @@ struct MapView: View {
                     store.setRoom(room, on: !room.on)
                 } else {
                     let enclosed = store.snapshot.allLights.filter { light in
-                        guard let p = store.floorplan.lamps[light.id] else { return false }
+                        guard let p = store.floorplan.lamps[light.id], p.floorID == box.floorID else { return false }
                         return box.contains(x: p.x, y: p.y)
                     }
                     let anyOn = enclosed.contains(where: \.on)
@@ -2615,7 +2631,7 @@ private struct FloorplanRoomBoxView: View {
                     onSelect()
                     dragStartBox = box
                     dragEnclosedIDs = store.floorplan.lamps.compactMap { lid, p in
-                        box.contains(x: p.x, y: p.y) ? lid : nil
+                        (p.floorID == box.floorID && box.contains(x: p.x, y: p.y)) ? lid : nil
                     }
                     var starts: [String: (Double, Double)] = [:]
                     for lid in dragEnclosedIDs {
@@ -2623,7 +2639,7 @@ private struct FloorplanRoomBoxView: View {
                     }
                     dragStartLamps = starts
                     var sensorStarts: [String: (Double, Double)] = [:]
-                    for (sid, p) in store.floorplan.sensors where box.contains(x: p.x, y: p.y) {
+                    for (sid, p) in store.floorplan.sensors where p.floorID == box.floorID && box.contains(x: p.x, y: p.y) {
                         sensorStarts[sid] = (p.x, p.y)
                     }
                     dragStartSensors = sensorStarts
@@ -2739,6 +2755,7 @@ private struct FloorplanRoomBoxView: View {
                 .frame(width: 22, height: 22)
                 .contentShape(Circle())
                 .position(lp)
+                .accessibilityLabel(store.trf("Corner {0}", [String(idx + 1)]))
                 .help(store.tr("Drag corner to reshape room (right-click to delete corner)"))
                 .onTapGesture(count: 2) {
                     if pts.count > 3 {

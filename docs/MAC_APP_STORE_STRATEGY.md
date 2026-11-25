@@ -18,9 +18,10 @@ The official Philips Hue app is mobile-only (iOS/iPadOS) and not offered as a na
 1. **Interactive Floorplan Studio (`Map | Rules`)**: Drag & drop lamps, rooms, furniture stamps, custom floorplan images, 1:1 lamp icons, hover-only clean labels, and visual line-drawing rules (`sensor / lamp → lamp`).
 2. **Complete Hue Ecosystem**: Native CLIP v2 + SSE live updates, **Hue Bridge Pro (`BSB003`) MotionAware™** RF presence badges & sensitivity controls, plus physical **Motion, Contact, and Switch/Dial sensors**.
 3. **Built-in Audio Reactive Light Sync** (without needing a separate Hue Sync app).
-4. **6 Distinct Visual Skins** + native macOS menu bar & desktop window UX + **8 interface languages** (EN, DE, FR, ES, IT, PT, JA, ZH).
+4. **6 Distinct Visual Skins** + native macOS menu bar & desktop window UX + **8 interface languages** (EN, DE, FR, ES, IT, PT, NL, PL).
 5. **Animated Built-in Help Guide (`?`)** & **Zero-hardware Demo Mode** (lets buyers & App Review test every feature immediately).
-6. **Optional Local-First "Ask AI" & Local MCP Server (`--mcp`)**: Power-user bonuses that never get in the way of regular users.
+6. **Optional Local-First "Ask AI"** (Pro, opt-in) & **Free Local MCP Server (`--mcp`)**: Power-user bonuses that never get in the way of regular users.
+7. **9 Local-First Lighting Ecosystems:** Works with Philips Hue, Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, and IKEA DIRIGERA — plus **Floorplan Studio v2** (reshapable polygon rooms, multi-floor tabs, realistic apartment/house gallery, and Future Lighting Planner with Lumens/Lux/Shopping List).
 
 ### CRITICAL Marketing Rule — "Ask AI" Positioning
 > **Always market "Ask AI" as strictly OPTIONAL (opt-in, default OFF) and 100% local-first.**
@@ -37,7 +38,7 @@ The official Philips Hue app is mobile-only (iOS/iPadOS) and not offered as a na
 - **One-Time Pro Unlock (Non-Consumable IAP via StoreKit 2):**
   - **Launch offer:** **7,99 € / $7.99** (first 2–4 weeks)
   - **Standard price:** **9,99 € / $9.99** (optional step-up to **12,99 €** later)
-  - Unlocks full live Bridge control for: Floorplan Studio, Visual Rules & Sensors, Bridge Pro MotionAware™, Audio Light Synth, all 6 Skins, optional Ask AI, and MCP server.
+  - Unlocks full live control for: Floorplan Studio v2 (polygons, multi-floor, gallery, lighting planner), Visual Rules & Sensors, Bridge Pro MotionAware™, Audio Light Synth, all 6 Skins, and optional Ask AI. (Local MCP server `--mcp` stays free.)
   - Includes a standard **"Restore Purchases"** button in Settings & Paywall sheet.
 - **Why this model was chosen:**
   - Hardware-app buyers want to verify Hue Bridge connectivity in 10 seconds before paying → much higher trust and conversion.
@@ -68,10 +69,11 @@ The official Philips Hue app is mobile-only (iOS/iPadOS) and not offered as a na
 
 ## 4. Mac App Store Review & Technical Checklist
 - **Entitlements & Privacy Strings:**
-  - `NSLocalNetworkUsageDescription` (clear explanation: discovers and controls Philips Hue Bridge on the local LAN).
-  - `NSBonjourServices`: `["_hue._tcp"]`.
-  - `NSMicrophoneUsageDescription` (only if Audio Sync captures mic/system input — explain clearly and request lazily only when Audio Sync is started).
-  - App Sandbox enabled (`com.apple.security.app-sandbox`, `com.apple.security.network.client`).
+  - `NSAppTransportSecurity` → `NSAllowsLocalNetworking = true` (local HTTP to Home Assistant, WLED, Shelly, Nanoleaf including `.local` hostnames).
+  - `NSLocalNetworkUsageDescription` (discovers and controls Philips Hue, Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, and IKEA DIRIGERA on the local LAN).
+  - `NSBonjourServices`: `["_hue._tcp", "_home-assistant._tcp", "_wled._tcp", "_nanoleafapi._tcp", "_shelly._tcp", "_ihsp._tcp"]`.
+  - `NSMicrophoneUsageDescription` (only if Audio Sync captures mic input — explain clearly and request lazily only when Audio Sync is started).
+  - App Sandbox enabled (`com.apple.security.app-sandbox`, `com.apple.security.network.client`, `com.apple.security.network.server` for Govee LAN UDP 4002 replies, `com.apple.security.files.user-selected.read-only` for floorplan image import, `com.apple.security.device.audio-input`).
 - **App Review Demo Account / Hardware:** Highlight **Demo Mode** prominently in "App Review Notes" so Apple reviewers without a physical Hue Bridge can test Rooms, Floorplan, Rules, MotionAware™, Sensors, Skins, Help, and optional Ask AI immediately.
 - **MCP CLI (`--mcp`):** Note that inside the Mac App Store sandbox, GUI launch is primary; document `--mcp` clearly for power users / direct CLI invocation or optional helper.
 - **App Store Screenshots (5–6 high-impact frames):**

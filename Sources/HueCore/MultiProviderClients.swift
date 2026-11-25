@@ -23,6 +23,7 @@ public enum ProviderClientError: Error, LocalizedError, Equatable, Sendable {
     case invalidResponse
     case pairingTimedOut
     case certificateMismatch
+    case duplicateHost
 
     public var errorDescription: String? {
         switch self {
@@ -33,7 +34,8 @@ public enum ProviderClientError: Error, LocalizedError, Equatable, Sendable {
         case .httpStatus(let code, let msg): return msg.isEmpty ? "HTTP \(code)" : "HTTP \(code): \(msg)"
         case .invalidResponse: return "Unexpected response from device."
         case .pairingTimedOut: return "Button press timed out. Press the button on the device and try again."
-        case .certificateMismatch: return "The device TLS certificate changed. Remove and re-add this device if it was replaced."
+        case .certificateMismatch: return "The device's security certificate changed. If you renewed it, choose Trust new certificate."
+        case .duplicateHost: return "A device with this address is already added."
         }
     }
 }
@@ -1339,22 +1341,50 @@ public enum GoveeCodec {
     }
 }
 
+/// D3: Serializes all Govee LAN UDP port 4002 listens so multiple Govee devices or overlapping
+/// refreshes never contend on port 4002 and drop replies.
+private actor GoveePortSerializer {
+    static let shared = GoveePortSerializer()
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func withLock<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        if busy {
+            await withCheckedContinuation { cont in
+                waiters.append(cont)
+            }
+        }
+        busy = true
+        defer {
+            if waiters.isEmpty {
+                busy = false
+            } else {
+                let next = waiters.removeFirst()
+                next.resume()
+            }
+        }
+        return try await operation()
+    }
+}
+
 enum GoveeDriver {
     /// Govee LAN receives `devStatus` on UDP 4003 and sends the JSON reply back to client UDP port 4002.
     static func fetchState(connection: ProviderConnection) async throws -> ProviderFetchResult {
-        guard let reply = try await LocalUDPTransport.exchangeListeningOn(
-            replyPort: 4002,
-            targetHost: connection.host,
-            targetPort: connection.effectivePort,
-            payload: GoveeCodec.encodeDevStatus(),
-            timeout: 2.2
-        ) else {
-            throw ProviderClientError.networkFailure("No reply from Govee light on UDP port 4002 (ensure LAN Control is enabled)")
+        try await GoveePortSerializer.shared.withLock {
+            guard let reply = try await LocalUDPTransport.exchangeListeningOn(
+                replyPort: 4002,
+                targetHost: connection.host,
+                targetPort: connection.effectivePort,
+                payload: GoveeCodec.encodeDevStatus(),
+                timeout: 2.2
+            ) else {
+                throw ProviderClientError.networkFailure("No reply from Govee light on UDP port 4002 (ensure LAN Control is enabled)")
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] else {
+                throw ProviderClientError.invalidResponse
+            }
+            return GoveeCodec.parseStatus(connection: connection, json: json)
         }
-        guard let json = try? JSONSerialization.jsonObject(with: reply) as? [String: Any] else {
-            throw ProviderClientError.invalidResponse
-        }
-        return GoveeCodec.parseStatus(connection: connection, json: json)
     }
 
     static func setLight(

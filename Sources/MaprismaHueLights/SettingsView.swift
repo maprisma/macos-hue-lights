@@ -7,6 +7,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var store: HueStore
     @EnvironmentObject var proStore: ProStoreManager
+    @State private var confirmRemoveProviderID: String? = nil
 
     #if DEBUG
     private enum DebugProSimulation: Int, CaseIterable, Identifiable {
@@ -518,7 +519,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    Text(store.tr("Independent third-party app. Not affiliated with or endorsed by Signify Holding / Philips Hue."))
+                    Text(store.tr("Independent third-party app. Not affiliated with or endorsed by Signify Holding (Philips Hue), IKEA, LIFX, Govee, Nanoleaf, Shelly, WiZ, WLED, or Home Assistant."))
                         .font(store.scaledFont(10))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -716,18 +717,19 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                 if !errText.isEmpty && conn.enabled {
-                                    Text(errText)
+                                    Text(store.tr(errText))
                                         .font(store.scaledFont(10))
                                         .foregroundStyle(Color.orange)
                                         .lineLimit(2)
                                 }
                             }
                             Spacer(minLength: 4)
-                            Toggle("", isOn: Binding(
+                            Toggle(store.trf("Enable {0}", [conn.name]), isOn: Binding(
                                 get: { conn.enabled },
                                 set: { store.setProviderEnabled(id: conn.id, enabled: $0) }
                             ))
                             .labelsHidden()
+                            .accessibilityLabel(store.trf("Enable {0}", [conn.name]))
                             .toggleStyle(.switch)
                             .controlSize(.mini)
                             Button {
@@ -738,15 +740,32 @@ struct SettingsView: View {
                             }
                             .buttonStyle(.borderless)
                             .help(store.tr("Edit Lighting Device"))
-                            Button(role: .destructive) {
-                                store.removeProvider(id: conn.id)
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.red.opacity(0.85))
+                            .accessibilityLabel(store.trf("Edit {0}", [conn.name]))
+                            if confirmRemoveProviderID == conn.id {
+                                Button(store.tr("Remove"), role: .destructive) {
+                                    confirmRemoveProviderID = nil
+                                    store.removeProvider(id: conn.id)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.red)
+                                .controlSize(.mini)
+                                Button(store.tr("Cancel")) {
+                                    confirmRemoveProviderID = nil
+                                }
+                                .buttonStyle(.borderless)
+                                .controlSize(.mini)
+                            } else {
+                                Button(role: .destructive) {
+                                    confirmRemoveProviderID = conn.id
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Color.red.opacity(0.85))
+                                }
+                                .buttonStyle(.borderless)
+                                .help(store.tr("Remove Device"))
+                                .accessibilityLabel(store.trf("Remove {0}", [conn.name]))
                             }
-                            .buttonStyle(.borderless)
-                            .help(store.tr("Remove Device"))
                         }
                         .padding(8)
                         .background(

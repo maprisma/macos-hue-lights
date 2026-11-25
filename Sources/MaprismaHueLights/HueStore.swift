@@ -77,6 +77,7 @@ final class HueStore: ObservableObject {
 
     // Visual Floorplan & Spatial Light Studio
     @Published var floorplan: FloorplanDocument = FloorplanDocument()
+    @Published var lastUndoFloorplan: FloorplanDocument? = nil
     @Published private(set) var floorplanBackgroundImage: NSImage? = nil
     @Published private(set) var floorplanSyncing: Bool = false
     @Published var floorplanStatusMessage: String? = nil
@@ -1206,6 +1207,17 @@ final class HueStore: ObservableObject {
         multiClient?.removeProvider(id: id)
     }
 
+    @discardableResult
+    func trustNewProviderCertificate(id: String) -> Result<Void, Error> {
+        guard let mc = multiClient else { return .failure(ProviderClientError.unsupported) }
+        do {
+            try mc.trustNewCertificate(id: id)
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
     func hasProviderSecret(for connectionID: String) -> Bool {
         multiClient?.hasSecret(for: connectionID) ?? false
     }
@@ -1287,6 +1299,13 @@ final class HueStore: ObservableObject {
         if let saved = settings.loadFloorplan(bridgeID: key) {
             floorplan = saved
             floorplanBackgroundImage = settings.loadFloorplanBackgroundImage(fileName: saved.background.fileName)
+        } else if key != "multi-home", key != "demo",
+                  var migrated = settings.loadFloorplan(bridgeID: "multi-home") {
+            // D2: Migrate an existing multi-home floorplan when the user pairs a Hue Bridge for the first time
+            migrated.bridgeID = key
+            floorplan = migrated
+            floorplanBackgroundImage = settings.loadFloorplanBackgroundImage(fileName: migrated.background.fileName)
+            persistFloorplan()
         } else {
             floorplan = FloorplanTemplate.build(template: .autoBridge, snapshot: snap, bridgeID: key)
             floorplanBackgroundImage = nil
@@ -1475,6 +1494,7 @@ final class HueStore: ObservableObject {
     func deleteFloor(id: String) {
         guard floorplan.floors.count > 1,
               let idx = floorplan.floors.firstIndex(where: { $0.id == id }) else { return }
+        lastUndoFloorplan = floorplan
         floorplan.floors.remove(at: idx)
         let fallback = floorplan.floors[0].id
         floorplan.boxes.removeAll { $0.floorID == id }
@@ -1496,7 +1516,23 @@ final class HueStore: ObservableObject {
         persistFloorplan()
     }
 
+    func undoLastFloorplanChange() {
+        guard let prev = lastUndoFloorplan else { return }
+        lastUndoFloorplan = nil
+        floorplan = prev
+        floorplanBackgroundImage = settings.loadFloorplanBackgroundImage(fileName: prev.background.fileName)
+        persistFloorplan()
+    }
+
+    func moveLampToActiveFloor(_ lightID: String) {
+        guard var p = floorplan.lamps[lightID] else { return }
+        p.floorID = floorplan.activeFloorID
+        floorplan.lamps[lightID] = p
+        persistFloorplan()
+    }
+
     func applyGalleryPreset(id: String, includeSamplePlan: Bool) {
+        lastUndoFloorplan = floorplan
         var doc: FloorplanDocument
         if id == "bungalow_l_shape" {
             doc = FloorplanTemplate.buildLShapedBungalow(snapshot: snapshot, bridgeID: currentBridgeID)
@@ -1747,7 +1783,7 @@ final class HueStore: ObservableObject {
     /// moves devices between rooms (1-room-per-device rule), updates zone memberships, and syncs
     /// linked Entertainment Area 2D/3D coordinates.
     func syncAllFloorplanToBridge() {
-        guard !floorplanSyncing else { return }
+        guard !floorplanSyncing, (snapshot.hueBridgePaired || snapshot.isDemo) else { return }
         floorplanSyncing = true
         dismissedFloorplanDiffKey = ""
 
@@ -1831,12 +1867,13 @@ final class HueStore: ObservableObject {
 
             // 4) Sync overlapping Zone boxes that are linked to a Bridge zone (including clearing empty zones)
             for box in self.floorplan.boxes where box.kind == "zone" {
-                guard let hueID = box.hueID else { continue }
+                guard let hueID = box.hueID, HueColorMath.validUUID(hueID) else { continue }
                 let enclosed = self.deviceOrLightIDs(in: box)
                 let currentMembers: [String] = self.snapshot.rooms
                     .first(where: { $0.kind == "zone" && $0.hueID == hueID })?
                     .lights
-                    .map { $0.deviceID.isEmpty ? $0.id : $0.deviceID } ?? []
+                    .filter { HueColorMath.validUUID($0.id) }
+                    .map(\.id) ?? []
                 if Set(enclosed) != Set(currentMembers) {
                     _ = await self.client.updateRoom(id: hueID, kind: "zone", name: nil, archetype: nil, deviceIDs: enclosed)
                 }
@@ -1883,7 +1920,10 @@ final class HueStore: ObservableObject {
     private func deviceOrLightIDs(in box: FloorplanBox) -> [String] {
         var ids: [String] = []
         var seen = Set<String>()
-        for (lightID, placement) in floorplan.lamps where box.contains(x: placement.x, y: placement.y) {
+        for (lightID, placement) in floorplan.lamps
+            where placement.floorID == box.floorID
+                && HueColorMath.validUUID(lightID)
+                && box.contains(x: placement.x, y: placement.y) {
             if let light = snapshot.light(lightID) {
                 let key = (box.kind == "zone") ? light.id : (light.deviceID.isEmpty ? light.id : light.deviceID)
                 if seen.insert(key).inserted {

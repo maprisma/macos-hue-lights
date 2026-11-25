@@ -10,7 +10,7 @@ public enum AppAccessMode: String, Codable, Sendable, Equatable {
     case pro
 }
 
-/// Features unlocked by the one-time Maprisma Hue Lights Pro purchase (and freely previewable in Demo Mode).
+/// Features unlocked by the one-time Maprisma Lights Pro purchase (and freely previewable in Demo Mode).
 public enum ProFeature: String, CaseIterable, Identifiable, Sendable {
     case floorplan
     case rules
@@ -18,7 +18,6 @@ public enum ProFeature: String, CaseIterable, Identifiable, Sendable {
     case audioSynth
     case skins
     case askAI
-    case mcp
 
     public var id: String { rawValue }
 }

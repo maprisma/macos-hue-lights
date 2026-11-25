@@ -1373,7 +1373,7 @@ final class ProAccessPolicyTests: XCTestCase {
     }
 
     func testFeatureUnlockMatrixFreeDemoPro() {
-        XCTAssertEqual(ProFeature.allCases.count, 7)
+        XCTAssertEqual(ProFeature.allCases.count, 6)
         for feature in ProFeature.allCases {
             // Free on a real Hue Bridge -> Pro features locked
             XCTAssertFalse(
@@ -1648,5 +1648,54 @@ final class MultiProviderTests: XCTestCase {
         XCTAssertEqual(secrets.loadSecret(for: "ha1"), "top-secret-token")
         try secrets.deleteSecret(for: "ha1")
         XCTAssertNil(secrets.loadSecret(for: "ha1"))
+    }
+
+    func testReviewFixesFloorSyncNonHueSkipAndAliases() throws {
+        // B1 + B2: Floor-isolated sync plan & non-Hue lamps/boxes excluded
+        let hueLightID = "11111111-1111-1111-1111-111111111111"
+        let hueRoomID = "cccccccc-1111-1111-1111-111111111111"
+        let hueRoom = HueRoom(
+            hueID: hueRoomID, kind: "room", name: "Living",
+            groupedLight: "", on: true, bri: 80, onCount: 1, archetype: "living_room",
+            color: "#ffd27a",
+            lights: [HueLight(id: hueLightID, name: "Floor Lamp", on: true, bri: 80, color: "#ffd27a")],
+            scenes: [], provider: "hue"
+        )
+        let wizRoom = HueRoom(
+            hueID: "wiz:w1:room", kind: "room", name: "Desk",
+            groupedLight: "", on: true, bri: 90, onCount: 1, archetype: "wiz",
+            color: "#ffffff",
+            lights: [HueLight(id: "wiz:w1:light", name: "WiZ Desk", on: true, bri: 90, color: "#ffffff", provider: "wiz")],
+            scenes: [], provider: "wiz"
+        )
+        let fp = FloorplanDocument(
+            floors: [FloorplanFloor(id: "eg", name: "Ground", level: 0), FloorplanFloor(id: "og", name: "Upper", level: 1)],
+            activeFloorID: "eg",
+            boxes: [
+                FloorplanBox(id: "b-eg", kind: "room", hueID: hueRoomID, name: "Living", x: 100, y: 100, width: 300, height: 240, floorID: "eg"),
+                // Upper floor unlinked box overlapping same x,y coordinates — must NOT pull EG Hue lamp!
+                FloorplanBox(id: "b-og", kind: "room", hueID: nil, name: "Upper Studio", x: 100, y: 100, width: 300, height: 240, floorID: "og"),
+                // Non-Hue box with WiZ lamp — must NOT create a Hue Bridge room!
+                FloorplanBox(id: "b-wiz", kind: "room", hueID: nil, name: "WiZ Corner", x: 500, y: 100, width: 200, height: 200, floorID: "eg"),
+            ],
+            lamps: [
+                hueLightID: FloorplanLampPlacement(x: 200, y: 200, z: 0, icon: .floor, floorID: "eg"),
+                "wiz:w1:light": FloorplanLampPlacement(x: 580, y: 180, z: 0, icon: .desk, floorID: "eg"),
+            ]
+        )
+        let pairedSnap = HueSnapshot(phase: "ok", rooms: [hueRoom, wizRoom], lightCount: 2, onCount: 2, hueBridgePaired: true)
+        let plan = FloorplanSpatial.buildSyncPlan(floorplan: fp, snapshot: pairedSnap)
+        XCTAssertTrue(plan.boxesToCreate.isEmpty, "Upper-floor box & non-Hue box must not propose Bridge creations")
+        XCTAssertTrue(plan.membershipDiffs.isEmpty, "Non-Hue lamps & other-floor boxes must not produce diffs")
+
+        let noHueSnap = HueSnapshot(phase: "ok", rooms: [wizRoom], lightCount: 1, onCount: 1, hueBridgePaired: false)
+        XCTAssertEqual(FloorplanSpatial.buildSyncPlan(floorplan: fp, snapshot: noHueSnap).totalChanges, 0)
+
+        // D1: Per-light alias persistence
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hue-aliases-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let st = SettingsStore(directory: dir)
+        try st.setLightAlias("Reading Lamp", for: "ha:h1:light.desk")
+        XCTAssertEqual(st.lightAliases()["ha:h1:light.desk"], "Reading Lamp")
     }
 }

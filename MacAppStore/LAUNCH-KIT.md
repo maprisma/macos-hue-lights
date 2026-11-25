@@ -13,27 +13,28 @@
 - **Primary Category:** Utilities · **Secondary Category:** Lifestyle
 - **Pricing Model (Option A — Zero Subscription):**
   - **Base App Download:** **Free**
-  - **Non-Consumable IAP Product ID:** **`com.maprisma.huelights.pro`** (`Maprisma Hue Lights Pro`, Family Sharing enabled)
+  - **Non-Consumable IAP Product ID:** **`com.maprisma.huelights.pro`** (`Maprisma Lights Pro`, Family Sharing enabled)
   - **Price Tier:** **$7.99 / €7.99** launch offer → **$9.99 / €9.99** standard one-time purchase *(NO subscription)*
 - **Age Rating:** 4+ (no objectionable content)
-- **App Privacy Nutrition Label:** **Data Not Collected** (all bridge traffic stays on the local LAN; audio for the Light Synthesizer is analyzed strictly in memory and never recorded or transmitted).
+- **App Privacy Nutrition Label:** **Data Not Collected** (all smart-lighting traffic stays on the local LAN across Philips Hue, Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, and IKEA DIRIGERA; credentials stay in macOS Keychain; optional Ask AI runs strictly locally/loopback-only; audio for the Light Synthesizer is analyzed strictly in memory and never recorded or transmitted).
 - **Export Compliance (`ITSAppUsesNonExemptEncryption`):** `NO` (uses only standard Apple OS TLS/HTTPS on the local network).
 
 ### Free vs. Demo vs. Pro Feature Matrix
 
-| Feature | Free (Real Hue Bridge) | Demo Mode (Simulated Home) | Pro (One-Time IAP `com.maprisma.huelights.pro`) |
+| Feature | Free (Real Devices) | Demo Mode (Simulated Home) | Pro (One-Time IAP `com.maprisma.huelights.pro`) |
 | :--- | :---: | :---: | :---: |
 | Menu bar popover & resizable desktop window | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Multi-brand local control (works with Philips Hue, Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly & IKEA DIRIGERA) | ✅ Free | ✅ Unlocked | ✅ Unlocked |
 | Rooms, Zones, Lights (power, brightness, color/warmth, scenes, rename, favorites) | ✅ Free | ✅ Unlocked | ✅ Unlocked |
-| Bridge discovery, pairing & pinned HTTPS | ✅ Free | ✅ Unlocked | ✅ Unlocked |
-| Animated Help & Guide (`?`), Native skin, 8 languages | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Bridge & LAN discovery, pairing & pinned HTTPS | ✅ Free | ✅ Unlocked | ✅ Unlocked |
+| Animated Help & Guide (`?`), Native skin, 8 languages, Local MCP server (`--mcp`) | ✅ Free | ✅ Unlocked | ✅ Unlocked |
 | Schedules (Bridge & Mac) | ✅ Free | ✅ Unlocked | ✅ Unlocked |
-| Visual Floorplan Studio & 12 custom lamp icons (`Map` tab) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
-| Visual Rules & physical Hue Sensors (`Rules` tab) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
+| Visual Floorplan Studio v2 (polygons, multi-floor, gallery, future lighting planner & 12 lamp icons) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
+| Visual Rules & physical sensors (`Rules` tab) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
 | Hue Bridge Pro MotionAware™ controls | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
 | Audio Reactive Light Synth (`Synth` tab) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
 | All 6 custom Skins (5 custom + Native) | Native free / 5 🔒 | ✅ Unlocked | ✅ Unlocked |
-| Optional local-first Ask AI (default OFF) & local MCP server (`--mcp`) | 🔒 Preview in Demo | ✅ Unlocked (`--demo --mcp`) | ✅ Unlocked |
+| Optional local-first Ask AI (default OFF, loopback-only) | 🔒 Preview in Demo | ✅ Unlocked | ✅ Unlocked |
 
 ### Local StoreKit 2 Testing in Xcode
 1. Open the generated Xcode project (`MacAppStore/project.yml` → `xcodegen generate`).
@@ -44,105 +45,97 @@
 
 ### English (`en-US` / `en-GB`)
 - **Name (30 chars max):** `Maprisma Lights` *(15 chars)*
-- **Subtitle (30 chars max):** `Floorplan, Rules & Music Hue` *(28 chars)*
+- **Subtitle (30 chars max):** `Smart Lights, Floorplan & Sync` *(30 chars)*
 - **Promotional Text (170 chars max):**
-  > Native macOS Hue controller with Visual Floorplan Studio, 6 prototypes, 12 lamp icons, wired rules, room scene schedules, Light Themes & Music Sync. Zero subscription.
+  > Native macOS local lighting controller — works with Philips Hue, Home Assistant, WLED, WiZ, LIFX, Govee, Nanoleaf, Shelly & IKEA DIRIGERA. Floorplan Studio v2 & Music Sync.
 - **Keywords (100 chars max):**
-  `philips hue,floorplan,smart home,menu bar,music sync,lights,schedule,automation,ambient,lamp,scenes`
+  `smart lights,floorplan,smart home,menu bar,music sync,wled,home assistant,lifx,wiz,govee,philips hue`
 - **Description:**
-  > **Take full control of your Philips Hue lights straight from your Mac menu bar — fast, native, private, and with zero subscription.**
+  > **Take full control of your smart lights straight from your Mac menu bar — fast, native, 100% local, and with zero subscription.**
   >
-  > Maprisma Lights is built natively in Swift for macOS. No browser tabs, no cloud accounts, no monthly fees: it talks directly to your Philips Hue Bridge on your local network over certificate-pinned HTTPS.
+  > Maprisma Lights is built natively in Swift for macOS and works with **Philips Hue** alongside **Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, and IKEA DIRIGERA** — all directly on your local network with no cloud accounts and no monthly fees.
   >
-  > **NEW: Interactive Visual Floorplan & Spatial Light Studio**
-  > - Place your Hue lamps freely on a live 2D home canvas — start from **6 editable house/apartment prototypes** with draggable, rotatable furniture stamps or import your own **custom floorplan background image**.
-  > - Pick from **12 lamp icons**, rename lights inline, surround lamps with **resizable Room & Zone boxes**, recall or save **Room Scenes**, and schedule scenes in one click (**⏰ Schedule scene**).
-  > - Draw **visual dependency wires** directly between lamps (Follow/Mirror, Exclusive, Companion) and push rooms, zones, names, and **Entertainment Area 2D/3D positions** to your Hue Bridge with **1-click Sync All** or **Auto-sync**.
+  > **NEW: Floorplan Studio v2 & Future Lighting Planner**
+  > - Place lights freely on a live 2D home canvas — start from realistic apartment & house drawings in the **Floorplan Gallery** (*Altbau 3-Room Apartment, 2-Story Family House, L-Shaped Bungalow, Open-Plan Loft*, and more) or import your own **custom floorplan image**.
+  > - Reshape rooms into **L-shapes, bay windows, T-shapes, and angled walls** with draggable vertices, wall lengths in meters, `m²` area, **multi-floor tabs (Ground / Upper)**, and rotatable furniture stamps including stairs.
+  > - **Plan Future Lighting:** Place virtual fixtures and bendable LED lightstrips, preview Day/Dusk/Night illumination and room Lux coverage, review your shopping list, and bind planned fixtures to real lights in 1 click.
+  > - Draw **visual dependency wires** directly between lights & sensors (Follow/Mirror, Exclusive, Companion) and push Hue rooms, zones, names, and **Entertainment Area 2D/3D positions** to your Philips Hue Bridge with **1-click Sync All** or **Auto-sync**.
   >
   > **Instant Menu Bar + Resizable Window**
-  > - Toggle rooms, zones, and individual lights in one click — or pop out a full 2-column window when organizing your home.
-  > - Master **All On / All Off** with per-room exclusions (keep the bedroom dark when hitting All On) and optional confirmation.
-  > - Pin your favorite lights, rooms, and scenes to the top strip, and filter by On, Rooms, Zones, or Favorites.
+  > - Toggle rooms, zones, and individual lights across all 9 local ecosystems in one click — or pop out a full 2-column window.
+  > - Master **All On / All Off** with per-room exclusions and optional confirmation.
+  > - Pin favorite lights, rooms, and scenes to the top strip, and filter by On, Rooms, Zones, or Favorites.
   >
-  > **Per-Lamp Light Themes, Colors & Native Effects**
-  > - Click any lamp's color dot to dial in Kelvin warmth, full color, or native Hue effects (Candle, Fire, Sparkle, Prism, Opal, Glisten).
-  > - Create and save your own **Light Themes** per lamp — or pick from 8 built-in themes (*Deep Focus, Golden Hour, Cozy Candle, Cyberpunk Neon, Ocean Calm, Sunset Glow, Forest Canopy, Nightlight*).
+  > **Per-Lamp Light Themes, Colors & Effects**
+  > - Dial in Kelvin warmth, full color, or native device effects, and save custom **Light Themes** per lamp or pick from 8 built-in themes.
   >
-  > **Schedules: On Your Hue Bridge or Live on Your Mac**
-  > - Schedule any individual light or room by clock time or **Sunrise / Sunset** (± offset), weekdays, brightness, and smooth fade.
-  > - Choose in Settings whether schedules run **natively on your Hue Bridge** (24/7 even while your Mac sleeps) or **live on your Mac**.
+  > **Schedules, Visual Rules, Sensors & MotionAware™**
+  > - Schedule lights or rooms by clock time or **Sunrise / Sunset** (± offset) on your Hue Bridge or live on your Mac.
+  > - Link lights, rooms, physical sensors/switches, and **Bridge Pro MotionAware™** presence areas in real time, plus Mac wake/sleep/lock triggers.
   >
-  > **Smart Linked-Light Rules, Sensors, Bridge Pro MotionAware™ & Mac Automation**
-  > - Link lights, rooms, **physical Hue sensors & switches** (motion, contact, buttons), and **Bridge Pro MotionAware™** radar presence areas together in real time via Hue's live event stream: *"When Hallway Motion detects motion → turn ON Hallway"* or *"When TV Strip turns ON → turn OFF Ceiling"*.
-  > - Add time windows or *"only if off"* conditions, plus **Mac wake, sleep, and screen lock** triggers.
-  > - Built-in cycle detection and echo suppression prevent flickering loops.
+  > **Animated Help Guide, Optional Ask AI (Off by Default) & Free Local MCP Server**
+  > - **Ask AI is strictly optional and OFF by default:** zero AI buttons appear unless you enable it in Settings (`⌘K`, offline + loopback-only local Ollama).
+  > - **Local MCP Server (`--mcp`):** Included free for power users connecting local MCP agents over stdio — credentials stay in macOS Keychain.
   >
-  > **Built-in Animated Visual Help Guide, Optional Ask AI (Off by Default) & Local MCP Server**
-  > - Open the built-in **animated Help & Guide** (`?`) anytime for a calm visual tour of every feature.
-  > - **Ask AI is strictly optional and OFF by default:** prefer a pure, non-AI native Hue app? You will never see an AI button unless you turn it on in Settings. When enabled (`⌘K`), switch lights, apply themes, and create rules or schedules in plain English or German completely offline (with optional loopback-only local Ollama support).
-  > - **Local MCP Server (`--mcp`):** Power users can connect any local MCP-compatible AI agent over stdio directly to their Mac — zero cloud, bridge keys stay safely in macOS Keychain.
+  > **Live Audio Light Synthesizer & Personalization**
+  > - Sync lights to **system music** or **microphone** with 3-band FFT & beat detection, **6 App Skins**, **8 Menu Bar Icons**, **Global Keyboard Shortcuts**, **Apple Shortcuts & Siri**, **8 languages**, and a full **Interactive Demo Home**.
   >
-  > **Live Audio Light Synthesizer**
-  > - Sync your Hue lights to **streamed system music** (Spotify, Apple Music, YouTube) or your **microphone** using real-time 3-band FFT (Bass, Mids, Treble) and beat detection.
-  > - Supports both zero-setup standard sync and ultra-low-latency **Hue Entertainment v2** streaming, with Pulse, Color Wave, Club, and Chill modes.
-  >
-  > **Make It Yours**
-  > - **6 Fun App Skins:** System Native, Neon Synthwave, Cozy Cabin, Retro Terminal, Disco Lava, and Minimal Zen.
-  > - **8 Selectable Menu Bar Icons** + optional lit-count badge.
-  > - Custom corners, background style, font family, font size, **Global Keyboard Shortcuts**, **Apple Shortcuts & Siri**, **Launch at Login**, and **8 interface languages** (English, Deutsch, Français, Español, Italiano, Português, Nederlands, Polski).
-  > - **Interactive Demo Home** built in so you can explore every feature even before pairing a Hue Bridge.
-  >
-  > *One-time purchase. Zero subscriptions. Zero cloud. Zero tracking.*
-  > *Independent third-party app. Not affiliated with or endorsed by Signify Holding / Philips Hue.*
+  > *One-time Pro unlock. Zero subscriptions. Zero cloud. Zero tracking.*
+  > *Independent third-party app. Not affiliated with or endorsed by Signify Holding (Philips Hue), IKEA, LIFX, Govee, Nanoleaf, Shelly, WiZ, WLED, or Home Assistant.*
 
-### German (`de-DE`) — Top European Hue Market
+### German (`de-DE`) — Top European Smart-Lighting Market
 - **Name:** `Maprisma Lights`
-- **Subtitle (30 chars max):** `Grundriss, Regeln & Musik Hue` *(29 chars)*
+- **Subtitle (30 chars max):** `Licht, Grundriss & Musik-Sync` *(29 chars)*
 - **Promotional Text:**
-  > Native macOS-App für Philips Hue: Visuelles Grundriss-Studio mit 6 Vorlagen & 12 Lampen-Icons, Raumszenen-Zeitpläne, gekoppelte Regeln, Lichtthemen & Musik-Sync. Kein Abo.
+  > Native macOS-Lichtsteuerung für Philips Hue, Home Assistant, WLED, WiZ, LIFX, Govee, Nanoleaf, Shelly & IKEA DIRIGERA. Grundriss-Studio v2, Lichtplaner & Musik-Sync. Kein Abo.
 - **Keywords (100 chars max):**
-  `philips hue,grundriss,smart home,menüleiste,musik sync,licht,zeitplan,automation,lampen,szenen,farbe`
+  `smart light,grundriss,smart home,menüleiste,musik sync,wled,home assistant,shelly,wiz,philips hue`
 - **Description (summary highlights ready for App Store Connect):**
-  > Steuere deine Philips-Hue-Lampen direkt aus der macOS-Menüleiste — blitzschnell, nativ in Swift, 100 % lokal und ohne Abo.
-  > - **Visuelles Grundriss-Studio (Map-Tab):** Platziere Lampen frei auf deiner Wohnungskarte — starte mit **6 bearbeitbaren Grundriss-Vorlagen** inkl. Möbel-Symbolen oder eigenem Hintergrundbild, wähle aus **12 Lampen-Icons**, zeichne skalierbare **Raum- & Zonenboxen** mit direkten Raumszenen & **⏰ Szenen-Zeitplänen**, ziehe **Abhängigkeits-Leitungen** zwischen Lampen und synchronisiere Räume, Namen & Entertainment-Positionen per **1-Klick-Sync** mit deiner Hue Bridge.
+  > Steuere deine smarten Lampen direkt aus der macOS-Menüleiste — blitzschnell, nativ in Swift, 100 % lokal und ohne Abo. Kompatibel mit **Philips Hue, Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly und IKEA DIRIGERA**.
+  > - **Grundriss-Studio v2 & Zukunfts-Lichtplaner (Map-Tab):** Formbare Polygon-Räume (L-Form, Erker, T-Form, schräge Wände), mehrere Etagen, realistische Grundriss-Galerie (Altbau, Einfamilienhaus, Bungalow, Loft), Tag/Dämmerung/Nacht-Vorschau, Lux/m²-Berechnung, Einkaufsliste und 1-Klick-Verknüpfung mit echten Lampen.
   > - **Menüleiste + eigenes Fenster:** Räume, Zonen, Einzellampen, Favoriten, Filter sowie „Alle an / Alle aus" mit Raum-Ausnahmen.
-  > - **Lichtthemen-Editor pro Lampe:** Farbtemperatur, Farben, native Hue-Effekte (Kerze, Feuer, Funkeln, Prisma) und eigene Themen speichern.
-  > - **Zeitpläne pro Lampe & Raum:** Wahlweise **nativ auf der Hue Bridge** (läuft auch im Ruhezustand) oder **live auf dem Mac** — mit Uhrzeit, Sonnenauf-/-untergang, Wochentagen & sanftem Überblenden.
-  > - **Abhängigkeits-Regeln, Sensoren, Bridge Pro MotionAware™ & Mac-Automation:** Verbinde Lampen, Räume, physische Hue-Bewegungs-, Kontakt- & Schaltsensoren sowie **Bridge Pro MotionAware™**-Präsenzbereiche direkt auf dem Grundriss — plus Auslösen bei Mac-Aufwachen/Ruhezustand/Sperren.
-  > - **Animierte Hilfe-Übersicht, optionales „Ask AI" (standardmäßig AUS) & lokaler MCP-Server:** Interaktive Feature-Tour über `?`; wer eine reine, KI-freie Hue-App möchte, sieht keinerlei KI-Funktionen. Optional in den Einstellungen aktivierbar (`⌘K`, offline auf Deutsch & Englisch + lokales Ollama nur auf Loopback) sowie nativer `--mcp`-Stdio-Server für lokale KI-Agenten.
-  > - **Musik-Licht-Synthesizer:** Reagiert live auf gestreamte Systemmusik oder Mikrofon (Bass/Mitten/Höhen + Beat-Erkennung, Hue Entertainment v2 & Standard-Sync).
-  > - **Persönlicher Stil:** 6 App-Skins (u. a. Neon Synthwave, Cozy Cabin, Retro Terminal, Disco Lava), 8 wählbare Menüleisten-Icons, abgerundete Ecken, Schriftart & -größe, globale Tastenkürzel, Apple Kurzbefehle & Siri, 8 Sprachen und eingebauter Demo-Modus.
+  > - **Lichtthemen-Editor, Zeitpläne & Abhängigkeits-Regeln:** Farbtemperatur, Farben, Effekte, Zeitpläne (Bridge oder Mac), physische Sensoren, Bridge Pro MotionAware™ und Mac-Aufwachen/Ruhezustand/Sperren.
+  > - **Animierte Hilfe, optionales „Ask AI" (standardmäßig AUS, nur lokal/Loopback) & kostenloser lokaler MCP-Server (`--mcp`).**
+  > - **Musik-Licht-Synthesizer & 6 App-Skins:** Systemmusik/Mikrofon-Sync, 8 Menüleisten-Icons, globale Tastenkürzel, Apple Kurzbefehle & Siri, 8 Sprachen und Demo-Modus.
+  > - *Unabhängige Drittanbieter-App. Keine Verbindung zu oder Unterstützung durch Signify Holding (Philips Hue), IKEA, LIFX, Govee, Nanoleaf, Shelly, WiZ, WLED oder Home Assistant.*
 
 ### Compact Localized Subtitles & Keywords (FR / ES / IT / PT / NL / PL)
 | Locale | Subtitle (≤30 chars) | Keywords (≤100 chars) |
 | :--- | :--- | :--- |
-| **fr-FR** | `Hue, Règles & Sync Musique` | `philips hue,domotique,barre menus,musique,lumières,horaires,automatisation,lampes,scènes,couleurs` |
-| **es-ES** | `Hue, Reglas y Sync Musical` | `philips hue,domótica,barra menús,música,luces,horarios,automatización,lámparas,escenas,colores` |
-| **it-IT** | `Hue, Regole e Sync Musica` | `philips hue,domotica,barra menu,musica,luci,programmazione,automazione,lampade,scene,colori` |
-| **pt-BR / pt-PT** | `Hue, Regras e Sync Musical` | `philips hue,casa inteligente,barra menu,música,luzes,agendamento,automação,lâmpadas,cenas,cores` |
-| **nl-NL** | `Hue, Regels & Muzieksync` | `philips hue,smart home,menubalk,muziek,lampen,schema,automatisering,scènes,kleuren,verlichting` |
-| **pl-PL** | `Hue, Reguły i Sync Muzyki` | `philips hue,smart home,pasek menu,muzyka,światła,harmonogram,automatyzacja,lampy,sceny,kolory` |
+| **fr-FR** | `Lumières, Plan & Sync Musique` | `lumières,plan,domotique,barre menus,musique,wled,home assistant,lifx,wiz,govee,philips hue` |
+| **es-ES** | `Luces, Planos y Sync Musical` | `luces,planos,domótica,barra menús,música,wled,home assistant,lifx,wiz,govee,philips hue` |
+| **it-IT** | `Luci, Planimetria & Musica` | `luci,planimetria,domotica,barra menu,musica,wled,home assistant,lifx,wiz,govee,philips hue` |
+| **pt-BR / pt-PT** | `Luzes, Planta & Sync Musical` | `luzes,planta,casa inteligente,barra menu,música,wled,home assistant,lifx,wiz,govee,philips hue` |
+| **nl-NL** | `Licht, Plattegrond & Muziek` | `verlichting,plattegrond,smart home,menubalk,muziek,wled,home assistant,lifx,wiz,govee,philips hue` |
+| **pl-PL** | `Światła, Plan i Sync Muzyki` | `światła,plan,smart home,pasek menu,muzyka,wled,home assistant,lifx,wiz,govee,philips hue` |
 
 ---
 
 ## 2. App Review Notes (Paste into App Store Connect → App Review Information)
 
-> **Testing without a Philips Hue Bridge (Built-in Demo Mode):**
-> This app controls Philips Hue smart lighting hardware on the user's local network. Because a physical Hue Bridge is not required to review the app, please click **"Try Demo Home"** on the initial pairing screen. Demo Mode simulates a complete 4-room Hue home (9 color/white lights, scenes, schedules, live dependency rules, Light Theme Editor, and the Audio Light Synthesizer with a built-in **"Demo Beat"** source) entirely in memory.
+> **Important — Menu Bar App & Testing Without Hardware (Built-in Demo Mode):**
+> Maprisma Lights runs in the macOS menu bar (`LSUIElement = true`). After launching the app, **click the lightbulb icon in the top-right macOS menu bar**, then click **"Try Demo Home"** on the initial setup screen (or click the pop-out button to open the full desktop window).
+> Demo Mode simulates a complete multi-room smart home (rooms, 9 color/white lights, scenes, Floorplan Studio v2 with polygons, multi-floor tabs, gallery templates and Future Lighting Planner, schedules, live dependency rules, Light Theme Editor, and the Audio Light Synthesizer with a built-in **"Demo Beat"** source) entirely in memory — no physical hardware is required for review.
 >
-> **Permissions explained:**
-> - **Local Network / Bonjour (`_hue._tcp`):** Used solely to discover and communicate with the user's Philips Hue Bridge on their LAN over certificate-pinned HTTPS.
-> - **Screen & System Audio Recording (`ScreenCaptureKit`):** Used exclusively for audio-only capture (`capturesAudio = true`) when the user explicitly starts the **Light Synthesizer** with "System Audio" selected so lights react to playing music. No screen video or audio is ever recorded, saved, or sent off-device.
-> - **Microphone (`AVAudioEngine`):** Optional alternative input for the Light Synthesizer when the user selects "Microphone". Audio is analyzed in memory only and never recorded or transmitted.
+> **Supported Local-Network Hardware & Entitlements Explained:**
+> Maprisma Lights communicates strictly on the user's local network with Philips Hue Bridges and 8 additional local-first smart lighting ecosystems (**Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, and IKEA DIRIGERA**). All device tokens and app keys are stored locally in the macOS Keychain.
+> - **Local Network & Bonjour (`com.apple.security.network.client`, `NSAllowsLocalNetworking`):** Discovers (`_hue._tcp`, `_home-assistant._tcp`, `_wled._tcp`, `_nanoleafapi._tcp`, `_shelly._tcp`, `_ihsp._tcp`) and controls local lighting devices over HTTPS/HTTP/UDP on the user's LAN.
+> - **Incoming Local UDP (`com.apple.security.network.server`):** Required specifically to receive local LAN status replies from **Govee LAN** smart lights, whose protocol sends unicast UDP responses back to the app on **UDP port 4002**. No internet-facing server is exposed.
+> - **User-Selected Read-Only Files (`com.apple.security.files.user-selected.read-only`):** Used only when the user clicks "Choose Image…" in Floorplan Studio (`NSOpenPanel`) to import a custom floorplan background image, which is copied into the app's sandbox container.
+> - **Screen & System Audio Recording (`ScreenCaptureKit`):** Used exclusively for audio-only capture (`capturesAudio = true`) when the user explicitly starts the **Light Synthesizer** with "System Audio" selected. No screen video or audio is ever recorded, saved, or sent off-device.
+> - **Microphone (`com.apple.security.device.audio-input` / `AVAudioEngine`):** Optional alternative input for the Light Synthesizer when the user selects "Microphone". Audio is analyzed in memory only.
+> - **Optional Ask AI (OFF by default):** When manually enabled by the user, runs strictly offline on-device with optional loopback-only (`127.0.0.1` / `localhost`) local Ollama support.
 > - **No account, no cloud, no analytics, no tracking.**
 
 ---
 
 ## 3. Privacy Policy Text (Host at `https://maprisma.com/hue-privacy.html` or `legal.html#hue`)
 
-> **Maprisma Hue Lights — Privacy Policy**
-> Maprisma Hue Lights does not collect, store, share, or sell any personal data.
-> - **Local Network Only:** The app communicates exclusively with your Philips Hue Bridge on your local network over certificate-pinned HTTPS. Your Hue Bridge application key is stored locally in the macOS Keychain.
+> **Maprisma Lights — Privacy Policy**
+> Maprisma Lights does not collect, store, share, or sell any personal data.
+> - **Local Network Only:** The app communicates exclusively on your local network with your configured smart lighting devices (Philips Hue Bridge, Home Assistant, WLED, WiZ, LIFX, Govee LAN, Nanoleaf, Shelly, and IKEA DIRIGERA). All bridge keys and device access tokens are stored locally in your macOS Keychain and never leave your Mac except to authenticate directly with the corresponding local device.
+> - **Optional Ask AI (Off by Default):** If you opt in to Ask AI in Settings, natural-language commands are parsed locally on your Mac; optional Ollama integration connects strictly to loopback (`127.0.0.1` / `localhost`) and never sends data to external cloud APIs.
+> - **Floorplan Images:** Custom floorplan background images selected via the macOS file picker are copied locally inside the app's sandbox container and never uploaded.
 > - **Audio Analysis:** When you start the Light Synthesizer with System Audio or Microphone input, audio samples are analyzed strictly in memory on your Mac to compute light brightness and color. Audio is never recorded, written to disk, or transmitted over the network.
 > - **No Analytics or Tracking:** There are no third-party SDKs, ads, telemetry, or cloud servers.
 > - **Contact:** Uwe Bruckhaus — `support@maprisma.com` (or your preferred contact email).
@@ -166,9 +159,9 @@ Take these 7 clean screenshots on your Mac in **Demo Mode** (so zero private roo
 
 ## 5. Step-by-Step Submission Checklist (With Your Apple Developer Membership)
 
-1. **Apply for Apple Small Business Program** *(if not enrolled yet — takes 5 min at `developer.apple.com/app-store/small-business-program/`)*: cuts Apple's fee from 30% → **15%** (at $4.99 you keep **~$4.24/sale**).
-2. **Choose your permanent Bundle ID** in Apple Developer Portal → *Certificates, Identifiers & Profiles* (e.g. `com.maprisma.HueLights` or `io.github.ubruckhaus.MaprismaHueLights`).
-3. **Create the app record** in **App Store Connect** → *My Apps → New App (macOS)*, set pricing ($4.99 / €4.99), paste metadata, upload App Icon & 2880×1800 screenshots, add Privacy Policy URL & App Review Notes.
+1. **Apply for Apple Small Business Program** *(if not enrolled yet — takes 5 min at `developer.apple.com/app-store/small-business-program/`)*: cuts Apple's fee from 30% → **15%**.
+2. **Choose your permanent Bundle ID** in Apple Developer Portal → *Certificates, Identifiers & Profiles* (`com.maprisma.lights`).
+3. **Create the app record** in **App Store Connect** → *My Apps → New App (macOS)*, set Base App to **Free** + Non-Consumable IAP `com.maprisma.huelights.pro` (**$7.99 / €7.99** launch → **$9.99 / €9.99** standard), paste metadata, upload App Icon & 2880×1800 screenshots, add Privacy Policy URL & App Review Notes.
 4. **Archive & Upload from Xcode on your Mac:**
    - Open the Xcode project (we'll generate an XcodeGen `project.yml` / `.xcodeproj` with `MaprismaHueLights.entitlements`, `PrivacyInfo.xcprivacy`, and `AppIcon.appiconset`).
    - Select **Any Mac (Apple Silicon, Intel)** → **Product → Archive** → **Distribute App → App Store Connect → Upload**.
@@ -183,7 +176,7 @@ Take these 7 clean screenshots on your Mac in **Demo Mode** (so zero private roo
 
 ### Best-ROI Channels (in order)
 1. **Hueblog.de & Hueblog.com (Highest conversion for Hue apps!):**
-   - Email Fabian (`info@hueblog.de`) with a short personal note (in German!), 3 screenshots, a 15-second screen recording of the Music Synthesizer + linked desk lights, and **2–3 free App Store promo codes** (App Store Connect gives you 100 free promo codes per version!). Hueblog readers are hardcore Philips Hue owners who happily pay €4.99 for a clean, no-subscription Mac app.
+   - Email Fabian (`info@hueblog.de`) with a short personal note (in German!), 3 screenshots, a 15-second screen recording of the Music Synthesizer + linked desk lights, and **2–3 free App Store promo codes** (App Store Connect gives you 100 free promo codes per version!). Hueblog readers are hardcore Philips Hue owners who happily pay €9.99 one-time for a clean, no-subscription Mac app.
 2. **Reddit (`r/Hue`, `r/macapps`, `r/MacOS`, `r/shortcuts`):**
    - Lead with the story & craft, not a hard ad: *"I built a native SwiftUI Philips Hue menu bar app for macOS because I wanted per-light schedules, linked desk lights, Mac wake/sleep triggers, and music sync in one lightweight app — no Electron, no cloud, no subscription."*
    - Include a crisp 15-second GIF/video showing: clicking menu bar bulb → toggling Desk Lamp (Monitor Backlight follows automatically!) → starting Music Synth → flipping from System to Neon Synthwave skin.

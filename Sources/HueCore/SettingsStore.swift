@@ -233,6 +233,26 @@ public struct SettingsStore {
         return object
     }
 
+    // MARK: - Per-Light Display Aliases (D1: rename hub-backed lights without renaming the hub connection)
+
+    public func lightAliases() -> [String: String] {
+        guard let raw = read()["light_aliases"] as? [String: String] else { return [:] }
+        return raw
+    }
+
+    public func setLightAlias(_ alias: String, for lightID: String) throws {
+        var settings = read()
+        var map = (settings["light_aliases"] as? [String: String]) ?? [:]
+        let clean = HueColorMath.clean(alias, limit: 40)
+        if clean.isEmpty {
+            map.removeValue(forKey: lightID)
+        } else {
+            map[lightID] = clean
+        }
+        settings["light_aliases"] = map
+        try write(settings)
+    }
+
     // MARK: - Language
 
     /// "auto" unless a known language code is saved.

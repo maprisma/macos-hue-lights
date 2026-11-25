@@ -756,7 +756,6 @@ class SwiftAppTests(unittest.TestCase):
             "case audioSynth",
             "case skins",
             "case askAI",
-            "case mcp",
             "public struct ProAccessPolicy: Sendable",
             'public static let proProductID = "com.maprisma.huelights.pro"',
             "public static func mode(isProUnlocked: Bool, isDemoMode: Bool) -> AppAccessMode",
@@ -764,6 +763,8 @@ class SwiftAppTests(unittest.TestCase):
             "public static func isSkinFree(_ skin: String) -> Bool",
         ):
             self.assertIn(needle, pro_access)
+        # A6: MCP server is free and not listed as a Pro feature
+        self.assertNotIn("case mcp", pro_access)
 
         pro_manager = read("Sources", "MaprismaHueLights", "ProStoreManager.swift")
         for needle in (
@@ -776,6 +777,7 @@ class SwiftAppTests(unittest.TestCase):
             "effectiveProUnlocked",
             "debugOverridePro",
             "formattedPrice",
+            "isProductLoaded",
             "purchasePro()",
             "restorePurchases()",
             "ProAccessPolicy.proProductID",
@@ -783,20 +785,36 @@ class SwiftAppTests(unittest.TestCase):
         ):
             self.assertIn(needle, pro_manager)
         self.assertNotIn("@Observable", pro_manager)
+        # A7: No hard-coded fallback price
+        self.assertNotIn('"€9.99"', pro_manager)
 
         pro_view = read("Sources", "MaprismaHueLights", "ProUpgradeView.swift")
         for needle in (
             "struct ProUpgradeView: View",
             "struct ProLockedOverlay: View",
             "struct ProFeatureGateBanner: View",
-            "Maprisma Hue Lights Pro",
+            "Maprisma Lights Pro",
             "One-time purchase · No subscription",
             "Restore Purchases",
             "Try free in Demo Mode",
             "Try in Demo Mode",
-            "Optional local-first Ask AI & local MCP server",
+            "Optional local-first Ask AI",
+            "Loading price…",
         ):
             self.assertIn(needle, pro_view)
+        self.assertNotIn("Maprisma Hue Lights Pro", pro_view)
+
+        # A1 & A4: Entitlements and local networking ATS in both project.yml and build-mac.sh
+        ent = read("MacAppStore", "MaprismaHueLights.entitlements")
+        self.assertIn("com.apple.security.files.user-selected.read-only", ent)
+        self.assertIn("com.apple.security.network.server", ent)
+        proj = read("MacAppStore", "project.yml")
+        self.assertIn("NSAllowsLocalNetworking: true", proj)
+        bsh = read("build-mac.sh")
+        self.assertIn("<key>NSAllowsLocalNetworking</key>", bsh)
+        sk = read("MacAppStore", "MaprismaHueLights.storekit")
+        self.assertIn("Maprisma Lights Pro", sk)
+        self.assertNotIn("Maprisma Hue Lights Pro", sk)
 
         app = read("Sources", "MaprismaHueLights", "MaprismaHueLightsApp.swift")
         self.assertIn("@StateObject private var proStore = ProStoreManager()", app)

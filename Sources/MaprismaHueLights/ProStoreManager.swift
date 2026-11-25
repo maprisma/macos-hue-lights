@@ -34,9 +34,13 @@ public final class ProStoreManager: ObservableObject {
         return isProUnlocked
     }
 
-    /// Localized StoreKit price once loaded, falling back to the standard price before StoreKit responds.
-    public var formattedPrice: String {
-        proProduct?.displayPrice ?? "€9.99"
+    /// Localized StoreKit price once loaded, or `nil` while loading / unavailable.
+    public var formattedPrice: String? {
+        proProduct?.displayPrice
+    }
+
+    public var isProductLoaded: Bool {
+        proProduct != nil
     }
 
     private var updatesTask: Task<Void, Never>?

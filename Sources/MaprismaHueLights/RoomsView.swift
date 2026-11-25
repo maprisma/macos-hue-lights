@@ -297,6 +297,15 @@ struct RoomCard: View {
                                     .font(store.scaledFont(13, weight: .semibold))
                                     .lineLimit(1)
                                 ProviderBadge(providerRaw: room.provider)
+                                if !room.lights.isEmpty && room.lights.allSatisfy({ !$0.reachable }) {
+                                    Text(store.tr("Offline"))
+                                        .font(store.scaledFont(8.5, weight: .semibold))
+                                        .foregroundStyle(Color.orange)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(Color.orange.opacity(0.14)))
+                                        .overlay(Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 0.5))
+                                }
                                 if isFav {
                                     Image(systemName: "star.fill")
                                         .font(.system(size: 9))

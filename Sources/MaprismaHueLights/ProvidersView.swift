@@ -163,12 +163,42 @@ struct AddProviderSheet: View {
 
                     // Discovered LAN devices (Bonjour)
                     if editing == nil {
+                        let existingTargets = Set(store.providerConnections.map {
+                            "\($0.kind.rawValue)|\($0.host.lowercased())|\($0.effectivePort)"
+                        })
+                        let addableFree = store.discoveredProviders.filter { dev in
+                            !dev.kind.requiresToken
+                                && !existingTargets.contains("\(dev.kind.rawValue)|\(dev.host.lowercased())|\(dev.port)")
+                        }
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text(store.tr("Discovered on local network").uppercased())
                                     .font(store.scaledFont(10, weight: .semibold))
                                     .foregroundStyle(.secondary)
                                 Spacer()
+                                if addableFree.count >= 2 {
+                                    Button(store.tr("Add all found")) {
+                                        var added = 0
+                                        for dev in addableFree {
+                                            let c = ProviderConnection(
+                                                kind: dev.kind,
+                                                name: dev.name,
+                                                host: dev.host,
+                                                port: dev.port,
+                                                useHTTPS: dev.kind.defaultUseHTTPS,
+                                                roomName: roomName
+                                            )
+                                            if case .success = store.saveProvider(c, secret: nil) {
+                                                added += 1
+                                            }
+                                        }
+                                        if added > 0 {
+                                            dismiss()
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                }
                                 Button {
                                     store.discoverProviders()
                                 } label: {
@@ -191,6 +221,7 @@ struct AddProviderSheet: View {
                             if !store.discoveredProviders.isEmpty {
                                 VStack(spacing: 4) {
                                     ForEach(store.discoveredProviders) { dev in
+                                        let isAdded = existingTargets.contains("\(dev.kind.rawValue)|\(dev.host.lowercased())|\(dev.port)")
                                         Button {
                                             selectedKind = dev.kind
                                             name = dev.name
@@ -213,20 +244,26 @@ struct AddProviderSheet: View {
                                                         .foregroundStyle(.secondary)
                                                 }
                                                 Spacer()
-                                                Text(store.tr("Use"))
+                                                Text(isAdded ? store.tr("Added") : store.tr("Use"))
                                                     .font(store.scaledFont(10.5, weight: .medium))
-                                                    .foregroundStyle(store.skinAccentColor)
+                                                    .foregroundStyle(isAdded ? Color.secondary : store.skinAccentColor)
                                             }
                                             .padding(.horizontal, 8)
                                             .padding(.vertical, 6)
                                             .background(
                                                 RoundedRectangle(cornerRadius: store.smallRadius, style: .continuous)
-                                                    .fill(Color.primary.opacity(0.05))
+                                                    .fill(Color.primary.opacity(isAdded ? 0.025 : 0.05))
                                             )
                                         }
                                         .buttonStyle(.plain)
+                                        .disabled(isAdded)
                                     }
                                 }
+                            } else if !store.discoveringProviders {
+                                Text(store.tr("Nothing found — find the IP in your router or the brand's app."))
+                                    .font(store.scaledFont(10.5))
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     }
@@ -275,10 +312,42 @@ struct AddProviderSheet: View {
                                 SecureField(
                                     sameSavedTarget
                                         ? store.tr("Saved in Keychain (leave blank to keep)")
-                                        : store.tr("Paste token or pair below"),
+                                        : (selectedKind.supportsButtonPairing
+                                            ? store.tr("Paste token or pair below")
+                                            : store.tr("Paste long-lived access token")),
                                     text: $token
                                 )
                                 .textFieldStyle(.roundedBorder)
+                            }
+                            if editing != nil && !sameSavedTarget && token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(store.tr("Host or port changed — enter a token or re-pair before saving."))
+                                    .font(store.scaledFont(10.5))
+                                    .foregroundStyle(Color.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+
+                        // B4: Allow trusting a renewed TLS certificate without deleting the device or losing map/rules
+                        if let ed = editing,
+                           (selectedKind == .dirigera || useHTTPS),
+                           (!ed.certFingerprint.isEmpty || (store.snapshot.providers.first(where: { $0.id == ed.id })?.error.lowercased().contains("certificate") == true)) {
+                            HStack(spacing: 8) {
+                                Button {
+                                    let res = store.trustNewProviderCertificate(id: ed.id)
+                                    switch res {
+                                    case .success:
+                                        certFingerprint = ""
+                                        statusIsError = false
+                                        statusMessage = store.tr("Certificate trusted — reconnecting.")
+                                    case .failure(let err):
+                                        statusIsError = true
+                                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
+                                    }
+                                } label: {
+                                    Label(store.tr("Trust new certificate"), systemImage: "checkmark.shield")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                             }
                         }
 
@@ -341,7 +410,7 @@ struct AddProviderSheet: View {
                         dismiss()
                     case .failure(let err):
                         statusIsError = true
-                        statusMessage = err.localizedDescription
+                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -407,7 +476,7 @@ struct AddProviderSheet: View {
     private func providerHint(for kind: LightProviderKind) -> String {
         switch kind {
         case .homeAssistant:
-            return store.tr("Connect your local Home Assistant to control Matter, Zigbee2MQTT, IKEA, Tuya, Aqara, ESPHome, and 100+ brands in one place.")
+            return store.tr("In Home Assistant: Profile → Security → Long-lived access tokens. Controls Matter, Zigbee2MQTT, IKEA, Tuya, Aqara, ESPHome, and 100+ brands locally.")
         case .wled:
             return store.tr("Direct local HTTP control for WLED LED strips with color, effects, and presets — no hub required.")
         case .wiz:
@@ -442,7 +511,7 @@ struct AddProviderSheet: View {
                     statusMessage = store.trf("Connected: {0}", [summary])
                 case .failure(let err):
                     statusIsError = true
-                    statusMessage = err.localizedDescription
+                    statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
                 }
             }
         }
@@ -452,7 +521,7 @@ struct AddProviderSheet: View {
         pairing = true
         statusIsError = false
         statusMessage = selectedKind == .nanoleaf
-            ? store.tr("Hold the Nanoleaf power button for 5–7 seconds …")
+            ? store.tr("Hold the Nanoleaf power button for 5–7 seconds now …")
             : store.tr("Press the Action Button underneath the DIRIGERA hub now …")
         let targetHost = draftConnection.host
         let targetPort = draftConnection.effectivePort
@@ -469,7 +538,7 @@ struct AddProviderSheet: View {
                         statusMessage = store.tr("Paired successfully! Click Save Device to connect.")
                     case .failure(let err):
                         statusIsError = true
-                        statusMessage = err.localizedDescription
+                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
                     }
                 }
             } else {
@@ -484,7 +553,7 @@ struct AddProviderSheet: View {
                         statusMessage = store.tr("Paired successfully! Click Save Device to connect.")
                     case .failure(let err):
                         statusIsError = true
-                        statusMessage = err.localizedDescription
+                        statusMessage = store.tr(MultiProviderCoordinator.friendlyErrorMessage(for: err))
                     }
                 }
             }

@@ -1952,9 +1952,11 @@ public enum FloorplanSpatial {
         var lightByID: [String: HueLight] = [:]
 
         for room in snapshot.rooms where room.kind != "zone" {
-            for light in room.lights {
+            // B2: Only Philips Hue Bridge rooms & lights participate in Bridge room membership sync
+            guard room.provider.isEmpty || room.provider == "hue" else { continue }
+            for light in room.lights where HueColorMath.validUUID(light.id) {
                 lightByID[light.id] = light
-                let rid: String? = room.kind == "room" && !room.hueID.isEmpty ? room.hueID : nil
+                let rid: String? = room.kind == "room" && HueColorMath.validUUID(room.hueID) ? room.hueID : nil
                 currentRoomByLight[light.id] = (rid, room.name)
                 if !light.deviceID.isEmpty {
                     lightsByDevice[light.deviceID, default: []].append(light)
@@ -1964,8 +1966,12 @@ public enum FloorplanSpatial {
 
         var diffs: [RoomMembershipDiff] = []
         for (lightID, placement) in floorplan.lamps {
-            guard let light = lightByID[lightID] else { continue }
-            let floorBoxes = floorplan.boxes.filter { $0.floorID == placement.floorID }
+            guard HueColorMath.validUUID(lightID), let light = lightByID[lightID] else { continue }
+            let floorBoxes = floorplan.boxes.filter { box in
+                guard box.floorID == placement.floorID else { return false }
+                if let hid = box.hueID, !hid.isEmpty, !HueColorMath.validUUID(hid) { return false }
+                return true
+            }
             guard let targetBox = boxContaining(x: placement.x, y: placement.y, in: floorBoxes, kindFilter: "room") else {
                 continue
             }
@@ -1998,6 +2004,10 @@ public enum FloorplanSpatial {
         floorplan: FloorplanDocument,
         snapshot: HueSnapshot
     ) -> FloorplanSyncPlan {
+        // B2: Without a paired Hue Bridge (or Demo mode), never propose Bridge sync actions.
+        guard snapshot.hueBridgePaired || snapshot.isDemo else {
+            return FloorplanSyncPlan(boxesToCreate: [], boxesToUpdateMeta: [], membershipDiffs: [], entertainmentBoxes: [])
+        }
         let diffs = pendingRoomMembershipDiffs(floorplan: floorplan, snapshot: snapshot)
         let diffsByBox = Set(diffs.map(\.toBoxID))
         var toCreate: [FloorplanBox] = []
@@ -2005,16 +2015,24 @@ public enum FloorplanSpatial {
         var entBoxes: [FloorplanBox] = []
 
         for box in floorplan.boxes {
-            if let hueID = box.hueID, let room = snapshot.rooms.first(where: { $0.hueID == hueID }) {
-                let nameChanged = HueColorMath.clean(box.name, limit: 32) != HueColorMath.clean(room.name, limit: 32)
-                let archChanged = !box.archetype.isEmpty && box.archetype != room.archetype && !room.archetype.isEmpty
-                if nameChanged || archChanged {
-                    toUpdateMeta.append(box)
+            if let hueID = box.hueID, !hueID.isEmpty {
+                // B2: Skip boxes linked to non-Hue provider rooms
+                guard HueColorMath.validUUID(hueID) else { continue }
+                if let room = snapshot.rooms.first(where: { $0.hueID == hueID && ($0.provider.isEmpty || $0.provider == "hue") }) {
+                    let nameChanged = HueColorMath.clean(box.name, limit: 32) != HueColorMath.clean(room.name, limit: 32)
+                    let archChanged = !box.archetype.isEmpty && box.archetype != room.archetype && !room.archetype.isEmpty
+                    if nameChanged || archChanged {
+                        toUpdateMeta.append(box)
+                    }
                 }
             } else {
-                // Only propose creating unlinked boxes that either contain lamps or were explicitly drawn
-                let hasAnyLamp = floorplan.lamps.values.contains { box.contains(x: $0.x, y: $0.y) }
-                if hasAnyLamp || diffsByBox.contains(box.id) {
+                // B1 + B2: Only propose creating unlinked boxes that contain Hue lamps on the SAME floor
+                let hasAnyHueLamp = floorplan.lamps.contains { lightID, placement in
+                    HueColorMath.validUUID(lightID)
+                        && placement.floorID == box.floorID
+                        && box.contains(x: placement.x, y: placement.y)
+                }
+                if hasAnyHueLamp || diffsByBox.contains(box.id) {
                     toCreate.append(box)
                 }
             }
@@ -2049,8 +2067,8 @@ public enum FloorplanSpatial {
         }
 
         var result: [String: (Double, Double, Double)] = [:]
-        for (lightID, placement) in floorplan.lamps {
-            let inside = box.contains(x: placement.x, y: placement.y)
+        for (lightID, placement) in floorplan.lamps where HueColorMath.validUUID(lightID) {
+            let inside = placement.floorID == box.floorID && box.contains(x: placement.x, y: placement.y)
             guard inside || allowedLightIDs.contains(lightID) else { continue }
             let nx = HueColorMath.clamp(((placement.x - box.x) / max(1.0, box.width)) * 2.0 - 1.0, -1.0, 1.0)
             let ny = HueColorMath.clamp(1.0 - ((placement.y - box.y) / max(1.0, box.height)), 0.0, 1.0)

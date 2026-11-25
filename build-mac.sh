@@ -110,6 +110,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>© 2026 Uwe Bruckhaus. All rights reserved.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Maprisma Lights finds your Philips Hue bridge and local smart lights (Home Assistant, WLED, WiZ, LIFX, Govee, Nanoleaf, Shelly, IKEA DIRIGERA) on your local network. It talks only to your local devices.</string>
     <key>NSMicrophoneUsageDescription</key>

@@ -54,6 +54,9 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
     private var pollTask: Task<Void, Never>?
     private var panelOpen: Bool = false
     private var started: Bool = false
+    private var refreshInFlight: Bool = false
+    private var refreshQueued: Bool = false
+    private var lightAliases: [String: String] = [:]
     #if canImport(Network)
     private let providerDiscovery = MultiProviderBonjourDiscovery()
     #endif
@@ -69,6 +72,7 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
         self.settings = settings
         self.secretStore = secretStore
         self.connections = settings.loadProviders()
+        self.lightAliases = settings.lightAliases()
         self.ruleEngine = RuleEngine(rules: rules, paused: rulesPaused)
         self.hueClient.onSnapshot = { [weak self] snap in
             self?.handleHueSnapshot(snap)
@@ -208,6 +212,15 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         let existing = connections.first(where: { $0.id == clean.id })
+        // E2: Block duplicate (kind, host, port) for a different connection ID
+        if connections.contains(where: {
+            $0.id != clean.id
+                && $0.kind == clean.kind
+                && $0.host.lowercased() == clean.host.lowercased()
+                && $0.effectivePort == clean.effectivePort
+        }) {
+            throw ProviderClientError.duplicateHost
+        }
         let sameTarget: Bool = {
             guard let ex = existing else { return false }
             return ex.kind == clean.kind
@@ -256,6 +269,47 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
             refreshExtraProviders()
         }
         emitMergedSnapshot()
+    }
+
+    /// B4: Clears the stored TLS fingerprint for a connection while keeping its ID and token intact,
+    /// so map placements, rules, schedules, and favorites are never orphaned on certificate renewal.
+    public func trustNewCertificate(id: String) throws {
+        guard let idx = connections.firstIndex(where: { $0.id == id }) else {
+            throw ProviderClientError.invalidHost
+        }
+        var next = connections
+        next[idx].certFingerprint = ""
+        try settings.saveProviders(next)
+        connections = next
+        connGenerations[id, default: 0] &+= 1
+        providerErrors.removeValue(forKey: id)
+        notifyProvidersChanged()
+        if started {
+            refreshExtraProviders()
+        }
+        emitMergedSnapshot()
+    }
+
+    /// E5: Maps raw OS/network/TLS errors to short, actionable plain-language messages.
+    public static func friendlyErrorMessage(for error: Error) -> String {
+        if let pe = error as? ProviderClientError {
+            return pe.errorDescription ?? error.localizedDescription
+        }
+        let raw = error.localizedDescription
+        let low = raw.lowercased()
+        if low.contains("certificate") || low.contains("fingerprint") || low.contains("tls") {
+            return "The device's security certificate changed. If you renewed it, choose Trust new certificate."
+        }
+        if low.contains("timed out") || low.contains("timeout") {
+            return "Device did not respond in time — check power and your local network."
+        }
+        if low.contains("refused") {
+            return "Connection refused — check that the device is on and the port is right."
+        }
+        if low.contains("no route") || low.contains("unreachable") || low.contains("could not connect") || low.contains("offline") {
+            return "Device not reachable — check the IP, it may have changed."
+        }
+        return raw.isEmpty ? "Connection failed" : raw
     }
 
     public func setProviderEnabled(id: String, enabled: Bool) {
@@ -357,7 +411,15 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 let intervalNs: UInt64 = await MainActor.run {
-                    (self?.panelOpen ?? false) ? 4_000_000_000 : 18_000_000_000
+                    guard let self = self else { return 18_000_000_000 }
+                    if self.panelOpen { return 4_000_000_000 }
+                    // D4: Poll faster when active rules rely on non-Hue triggers
+                    let hasNonHueRuleTrigger = !self.ruleEngine.paused && self.ruleEngine.rules.contains { rule in
+                        rule.enabled
+                            && rule.triggerKind != "desktop"
+                            && HueColorMath.providerPrefix(of: rule.triggerID) != "hue"
+                    }
+                    return hasNonHueRuleTrigger ? 5_000_000_000 : 18_000_000_000
                 }
                 try? await Task.sleep(nanoseconds: intervalNs)
                 guard !Task.isCancelled else { return }
@@ -373,6 +435,19 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
     }
 
     private func refreshExtraProvidersAsync() async {
+        // D3: Prevent overlapping refresh passes (especially important for Govee UDP port 4002)
+        if refreshInFlight {
+            refreshQueued = true
+            return
+        }
+        refreshInFlight = true
+        defer {
+            refreshInFlight = false
+            if refreshQueued {
+                refreshQueued = false
+                refreshExtraProviders()
+            }
+        }
         let active = enabledConnections
         guard !active.isEmpty else {
             emitMergedSnapshot()
@@ -432,7 +507,20 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
                     }
                 case .failure(let error):
                     providerConnected[conn.id] = false
-                    providerErrors[conn.id] = error.localizedDescription
+                    providerErrors[conn.id] = Self.friendlyErrorMessage(for: error)
+                    // B3: Mark previously cached lights for this provider unreachable so offline devices never look online
+                    if var cached = providerResults[conn.id] {
+                        cached.rooms = cached.rooms.map { room in
+                            var r = room
+                            r.lights = r.lights.map { light in
+                                var l = light
+                                l.reachable = false
+                                return l
+                            }
+                            return r
+                        }
+                        providerResults[conn.id] = cached
+                    }
                 }
             }
         }
@@ -667,12 +755,55 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
                 error: err
             ))
             if let res = res {
-                extraRooms.append(contentsOf: res.rooms)
+                // D1: Apply per-light display aliases (for hub providers or custom renamed lights)
+                let aliasedRooms: [HueRoom] = res.rooms.map { room in
+                    var r = room
+                    if !lightAliases.isEmpty {
+                        r.lights = r.lights.map { light in
+                            if let alias = lightAliases[light.id], !alias.isEmpty {
+                                var l = light
+                                l.name = alias
+                                return l
+                            }
+                            return light
+                        }
+                    }
+                    return r
+                }
+                extraRooms.append(contentsOf: aliasedRooms)
                 extraSensors.append(contentsOf: res.sensors)
                 extraLights += res.lightCount
                 extraOn += res.onCount
             }
         }
+
+        // E2: Merge single-device rooms that share the same custom room name (case-insensitive)
+        var mergedExtraRooms: [HueRoom] = []
+        var roomIndexByName: [String: Int] = [:]
+        for room in extraRooms {
+            let provKind = LightProviderKind.from(idPrefix: room.provider)
+            let isSingleDevice = provKind.map { !$0.isHubProvider && $0 != .hue } ?? false
+            let key = room.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if isSingleDevice && !key.isEmpty, let existingIdx = roomIndexByName[key] {
+                var target = mergedExtraRooms[existingIdx]
+                target.lights.append(contentsOf: room.lights)
+                target.scenes.append(contentsOf: room.scenes)
+                target.onCount = target.lights.filter(\.on).count
+                target.on = target.onCount > 0
+                let litBris = target.lights.filter(\.on).map(\.bri)
+                if !litBris.isEmpty {
+                    target.bri = litBris.reduce(0, +) / Double(litBris.count)
+                }
+                if room.on { target.color = room.color }
+                mergedExtraRooms[existingIdx] = target
+            } else {
+                if isSingleDevice && !key.isEmpty {
+                    roomIndexByName[key] = mergedExtraRooms.count
+                }
+                mergedExtraRooms.append(room)
+            }
+        }
+        extraRooms = mergedExtraRooms
 
         merged.providers = providerStatuses
         merged.hueBridgePaired = hueSnapshot.isPaired
@@ -937,17 +1068,23 @@ public final class MultiProviderBridgeClient: HueBridgeControlling {
     public func renameLight(id: String, name: String) {
         if HueColorMath.providerPrefix(of: id) == "hue" {
             hueClient.renameLight(id: id, name: name)
+            return
+        }
+        let clean = HueColorMath.clean(name, limit: 40)
+        guard !clean.isEmpty else { return }
+        let parts = id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+        // D1: Only rename the connection itself for single-light providers; for hubs (HA/DIRIGERA), store a per-light alias!
+        if parts.count >= 2,
+           let idx = connections.firstIndex(where: { $0.id == String(parts[1]) }),
+           !connections[idx].kind.isHubProvider {
+            connections[idx].name = clean
+            try? settings.saveProviders(connections)
+            notifyProvidersChanged()
+            refreshExtraProviders()
         } else {
-            let parts = id.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
-            if parts.count >= 2, let idx = connections.firstIndex(where: { $0.id == String(parts[1]) }) {
-                let clean = HueColorMath.clean(name, limit: 40)
-                if !clean.isEmpty {
-                    connections[idx].name = clean
-                    try? settings.saveProviders(connections)
-                    notifyProvidersChanged()
-                    refreshExtraProviders()
-                }
-            }
+            lightAliases[id] = clean
+            try? settings.setLightAlias(clean, for: id)
+            emitMergedSnapshot()
         }
     }
 
