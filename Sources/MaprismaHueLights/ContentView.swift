@@ -8,7 +8,8 @@ struct ContentView: View {
 
     @EnvironmentObject var store: HueStore
     @EnvironmentObject var proStore: ProStoreManager
-    var mode: DisplayMode = .popover
+    @Environment(\.openWindow) private var openWindow
+    var mode: DisplayMode = .detached
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,6 +105,7 @@ struct ContentView: View {
             )
         )
         .onAppear {
+            AppDelegate.shared?.openMainWindowAction = { openWindow(id: "main-window") }
             store.setPanel(open: true)
             proStore.start()
             store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
@@ -203,7 +205,14 @@ private struct WindowSizeModifier: ViewModifier {
         case .popover:
             content.frame(width: 440, height: 620)
         case .detached:
-            content.frame(minWidth: 520, idealWidth: 760, minHeight: 500, idealHeight: 640)
+            content.frame(
+                minWidth: 460,
+                idealWidth: 840,
+                maxWidth: .infinity,
+                minHeight: 460,
+                idealHeight: 660,
+                maxHeight: .infinity
+            )
         }
     }
 }
@@ -601,6 +610,11 @@ struct WindowObserver: NSViewRepresentable {
             center.addObserver(self, selector: #selector(resignedKey(_:)),
                                name: NSWindow.didResignKeyNotification, object: window)
             if mode == .detached {
+                window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable])
+                window.isMovable = true
+                window.isMovableByWindowBackground = true
+                window.minSize = NSSize(width: 460, height: 460)
+                window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
                 window.isRestorable = false
                 window.setFrameAutosaveName("")
                 center.addObserver(self, selector: #selector(frameChanged(_:)),

@@ -410,12 +410,13 @@ class SwiftAppTests(unittest.TestCase):
         self.assertIn(".macOS(.v13)", package)
         self.assertIn('path: "Sources/MaprismaHueLights"', package)
         app = read("Sources", "MaprismaHueLights", "MaprismaHueLightsApp.swift")
-        self.assertIn("MenuBarExtra", app)
-        self.assertIn(".menuBarExtraStyle(.window)", app)
         self.assertIn('Window("Maprisma Lights", id: "main-window")', app)
+        self.assertIn(".windowResizability(.contentMinSize)", app)
+        self.assertIn("NSStatusBar.system.statusItem", app)
         self.assertIn('"lightbulb.fill" : "lightbulb"', app)
         content = read("Sources", "MaprismaHueLights", "ContentView.swift")
-        self.assertIn(".frame(width: 440, height: 620)", content)
+        self.assertIn("maxWidth: .infinity", content)
+        self.assertIn("isMovableByWindowBackground = true", content)
 
     def test_pure_swift_and_sandbox_contract(self):
         self.assertFalse(os.path.exists(os.path.join(ROOT, "Sources", "HueCore", "HelperSupervisor.swift")))
@@ -875,7 +876,7 @@ class SwiftAppTests(unittest.TestCase):
         build = read("build-mac.sh")
         for needle in ("swift build -c release", 'dist/$APP_NAME.app', "Contents/MacOS",
                        "Contents/Resources/PrivacyInfo.xcprivacy", "Contents/Resources/translations",
-                       "ITSAppUsesNonExemptEncryption", "<key>LSUIElement</key>\n    <true/>",
+                       "ITSAppUsesNonExemptEncryption", "<key>LSUIElement</key>\n    <false/>",
                        'codesign --force --deep -s - "$APP"',
                        "NSLocalNetworkUsageDescription", "_hue._tcp"):
             self.assertIn(needle, build)

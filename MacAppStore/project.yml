@@ -52,7 +52,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "13.0"
-        LSUIElement: true
+        LSUIElement: false
         NSHighResolutionCapable: true
         NSHumanReadableCopyright: "© 2026 Uwe Bruckhaus. All rights reserved."
         NSAppTransportSecurity:

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Dispatch
 import Foundation
 import HueCore
@@ -24,73 +25,41 @@ enum MaprismaHueLightsEntrypoint {
     }
 }
 
-/// Maprisma Hue Lights for macOS: a 100% pure-Swift, App Sandbox-compliant menu bar app
-/// with an optional detachable resizable window, Light Synthesizer, Light Themes, App Skins,
-/// global hotkeys, optional local-first Ask AI, native `--mcp` server, StoreKit 2 Pro unlock,
-/// and Apple Shortcuts (`AppIntents`).
+/// Maprisma Lights for macOS: a 100% pure-Swift, App Sandbox-compliant native macOS window app
+/// (freely movable, resizable, and compatible with tiling window managers) with a menu bar
+/// quick-toggle icon, Light Synthesizer, Light Themes, App Skins, global hotkeys, optional
+/// local-first Ask AI, native `--mcp` server, StoreKit 2 Pro unlock, and Apple Shortcuts (`AppIntents`).
 struct MaprismaHueLightsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @ObservedObject private var store = HueStore.shared
     @StateObject private var proStore = ProStoreManager()
 
     var body: some Scene {
-        MenuBarExtra {
-            ContentView(mode: .popover)
-                .environmentObject(store)
-                .environmentObject(proStore)
-        } label: {
-            MenuBarIcon(
-                style: store.menuBarIcon,
-                lit: store.snapshot.anyLightOn,
-                onCount: store.snapshot.onCount,
-                showCount: store.showMenuBarCount,
-                synthRunning: store.synthRunning,
-                summary: store.l10n.summary(store.snapshot)
-            )
-        }
-        .menuBarExtraStyle(.window)
-
         Window("Maprisma Lights", id: "main-window") {
             ContentView(mode: .detached)
                 .environmentObject(store)
                 .environmentObject(proStore)
         }
-        .defaultSize(width: 760, height: 640)
-    }
-}
-
-struct MenuBarIcon: View {
-    let style: MenuBarIconStyle
-    let lit: Bool
-    let onCount: Int
-    let showCount: Bool
-    let synthRunning: Bool
-    let summary: String
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: style == .bulb ? (lit ? "lightbulb.fill" : "lightbulb") : style.symbol(lit: lit))
-            if synthRunning {
-                Image(systemName: "waveform")
-            }
-            if showCount && onCount > 0 {
-                Text("\(onCount)")
-                    .monospacedDigit()
-            }
-        }
-        .accessibilityLabel(Text("Maprisma Lights: \(summary)"))
-        .help(summary)
+        .defaultSize(width: 840, height: 660)
+        .windowResizability(.contentMinSize)
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var shared: AppDelegate?
+
+    var openMainWindowAction: (() -> Void)?
+
+    private var statusItem: NSStatusItem?
+    private var cancellables: Set<AnyCancellable> = []
     private var termination: DispatchSourceSignal?
     private var workspaceObservers: [NSObjectProtocol] = []
     private var distributedObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        Self.shared = self
+        NSApp.setActivationPolicy(.regular)
 
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
@@ -99,7 +68,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         termination = source
 
         registerDesktopEventObservers()
+        setupStatusBarItem()
         HueStore.shared.start()
+
+        DispatchQueue.main.async { [weak self] in
+            self?.showMainWindow()
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -113,6 +96,125 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         HueStore.shared.shutdown()
     }
+
+    // MARK: - Main Window Control
+
+    private func existingMainWindow() -> NSWindow? {
+        NSApp.windows.first { win in
+            win.identifier?.rawValue == "main-window" || win.title == "Maprisma Lights"
+        }
+    }
+
+    func showMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = existingMainWindow() {
+            if window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openMainWindowAction?()
+        }
+    }
+
+    func toggleMainWindow() {
+        if let window = existingMainWindow(), window.isVisible && !window.isMiniaturized && NSApp.isActive {
+            window.orderOut(nil)
+        } else {
+            showMainWindow()
+        }
+    }
+
+    // MARK: - Menu Bar Status Item (Left-Click Toggle, Right-Click Quick Menu)
+
+    private func setupStatusBarItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = item
+        if let button = item.button {
+            button.target = self
+            button.action = #selector(statusBarClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+
+        let store = HueStore.shared
+        store.$snapshot
+            .combineLatest(store.$menuBarIcon, store.$showMenuBarCount, store.$synthRunning)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _, _, _ in
+                self?.refreshStatusBarAppearance()
+            }
+            .store(in: &cancellables)
+        refreshStatusBarAppearance()
+    }
+
+    private func refreshStatusBarAppearance() {
+        guard let button = statusItem?.button else { return }
+        let store = HueStore.shared
+        let lit = store.snapshot.anyLightOn
+        let style = store.menuBarIcon
+        let symbolName = style == .bulb ? (lit ? "lightbulb.fill" : "lightbulb") : style.symbol(lit: lit)
+        let summary = store.l10n.summary(store.snapshot)
+
+        if let img = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Maprisma Lights: \(summary)") {
+            img.isTemplate = true
+            button.image = img
+        }
+        button.imagePosition = .imageLeading
+
+        var parts: [String] = []
+        if store.synthRunning { parts.append("♫") }
+        if store.showMenuBarCount && store.snapshot.onCount > 0 {
+            parts.append("\(store.snapshot.onCount)")
+        }
+        button.title = parts.isEmpty ? "" : " " + parts.joined(separator: " ")
+        button.toolTip = "Maprisma Lights — \(summary)"
+    }
+
+    @objc private func statusBarClicked(_ sender: NSStatusBarButton) {
+        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
+            presentStatusContextMenu(from: sender)
+        } else {
+            toggleMainWindow()
+        }
+    }
+
+    private func presentStatusContextMenu(from button: NSStatusBarButton) {
+        let store = HueStore.shared
+        let menu = NSMenu()
+        let showTitle = (existingMainWindow()?.isVisible == true && NSApp.isActive)
+            ? store.tr("Close")
+            : store.tr("Open in window")
+        let showItem = NSMenuItem(title: showTitle, action: #selector(menuToggleWindow), keyEquivalent: "")
+        showItem.target = self
+        menu.addItem(showItem)
+        menu.addItem(.separator())
+
+        let allOnItem = NSMenuItem(title: store.tr("All lights on"), action: #selector(menuAllOn), keyEquivalent: "")
+        allOnItem.target = self
+        allOnItem.isEnabled = store.snapshot.lightCount > 0
+        menu.addItem(allOnItem)
+
+        let allOffItem = NSMenuItem(title: store.tr("All lights off"), action: #selector(menuAllOff), keyEquivalent: "")
+        allOffItem.target = self
+        allOffItem.isEnabled = store.snapshot.anyLightOn
+        menu.addItem(allOffItem)
+
+        menu.addItem(.separator())
+        let quitItem = NSMenuItem(title: store.tr("Quit"), action: #selector(menuQuit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        statusItem?.menu = menu
+        button.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    @objc private func menuToggleWindow() { toggleMainWindow() }
+    @objc private func menuAllOn() { HueStore.shared.allOn(confirmed: true) }
+    @objc private func menuAllOff() { HueStore.shared.allOff() }
+    @objc private func menuQuit() { NSApp.terminate(nil) }
+
+    // MARK: - Desktop Wake / Sleep / Lock Observers
 
     private func registerDesktopEventObservers() {
         let ws = NSWorkspace.shared.notificationCenter
