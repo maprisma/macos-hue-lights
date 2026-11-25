@@ -424,6 +424,10 @@ struct ProblemBanner: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
             Spacer(minLength: 0)
+            Button(store.tr("Retry")) {
+                store.refresh()
+            }
+            .controlSize(.small)
         }
         .padding(10)
         .background(
