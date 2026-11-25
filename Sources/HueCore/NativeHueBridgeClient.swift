@@ -405,7 +405,7 @@ public final class NativeHueBridgeClient: HueBridgeControlling {
         // 2) POST /api pinned to the exact same certificate seen in step 1
         let hostRaw = ProcessInfo.processInfo.hostName
         let host = HueColorMath.clean(hostRaw, limit: 19)
-        let deviceType = "maprisma_hue_mac#" + (host.isEmpty ? "mac" : host)
+        let deviceType = "maprisma_lights#" + (host.isEmpty ? "mac" : host)
 
         let postResult = await Self.requestAppKey(
             ip: ip,

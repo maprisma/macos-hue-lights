@@ -2,9 +2,9 @@ import AppKit
 import HueCore
 import SwiftUI
 
-/// Root view shared by both the MenuBarExtra popover and the detachable resizable window.
+/// Root view for the resizable, movable Maprisma Lights desktop window.
 struct ContentView: View {
-    enum DisplayMode { case popover, detached }
+    enum DisplayMode { case detached }
 
     @EnvironmentObject var store: HueStore
     @EnvironmentObject var proStore: ProStoreManager
@@ -55,6 +55,10 @@ struct ContentView: View {
                     .tint(store.skinAccentColor)
                     .fontDesign(store.fontDesign)
                     .preferredColorScheme(store.preferredColorScheme)
+            } else {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .onAppear { store.showAskAISheet = false }
             }
         }
         .sheet(isPresented: $store.showProUpgradeSheet) {
@@ -86,7 +90,7 @@ struct ContentView: View {
                         .padding(16)
                 }
             }
-            .frame(width: 420, height: 500)
+            .frame(minWidth: 380, idealWidth: 440, maxWidth: 560, minHeight: 380, idealHeight: 500, maxHeight: 680)
             .environmentObject(store)
             .tint(store.skinAccentColor)
             .fontDesign(store.fontDesign)
@@ -98,24 +102,35 @@ struct ContentView: View {
         .background(
             WindowObserver(
                 mode: mode,
-                savedFrame: mode == .detached ? store.savedWindowFrame() : nil,
+                savedFrame: store.savedWindowFrame(),
                 preferredColorScheme: store.preferredColorScheme,
                 onChange: { open in store.setPanel(open: open) },
-                onFrameChange: mode == .detached ? { frame in store.saveWindowFrame(frame) } : nil
+                onFrameChange: { frame in store.saveWindowFrame(frame) }
             )
         )
         .onAppear {
             AppDelegate.shared?.openMainWindowAction = { openWindow(id: "main-window") }
             store.setPanel(open: true)
             proStore.start()
-            store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
+            if proStore.hasVerifiedEntitlements {
+                store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
+            }
         }
         .onDisappear { store.setPanel(open: false) }
+        .onChange(of: proStore.hasVerifiedEntitlements) { verified in
+            if verified {
+                store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
+            }
+        }
         .onChange(of: proStore.effectiveProUnlocked) { unlocked in
-            store.enforceFreeAccessFallbacks(isProUnlocked: unlocked)
+            if proStore.hasVerifiedEntitlements {
+                store.enforceFreeAccessFallbacks(isProUnlocked: unlocked)
+            }
         }
         .onChange(of: store.snapshot.isDemo) { _ in
-            store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
+            if proStore.hasVerifiedEntitlements {
+                store.enforceFreeAccessFallbacks(isProUnlocked: proStore.effectiveProUnlocked)
+            }
         }
     }
 
@@ -201,19 +216,14 @@ private struct WindowSizeModifier: ViewModifier {
     let mode: ContentView.DisplayMode
 
     func body(content: Content) -> some View {
-        switch mode {
-        case .popover:
-            content.frame(width: 440, height: 620)
-        case .detached:
-            content.frame(
-                minWidth: 460,
-                idealWidth: 840,
-                maxWidth: .infinity,
-                minHeight: 460,
-                idealHeight: 660,
-                maxHeight: .infinity
-            )
-        }
+        content.frame(
+            minWidth: 460,
+            idealWidth: 840,
+            maxWidth: .infinity,
+            minHeight: 460,
+            idealHeight: 660,
+            maxHeight: .infinity
+        )
     }
 }
 
@@ -279,22 +289,11 @@ struct HeaderView: View {
             if s.phase == "ok" {
                 Text(store.trf("{0} of {1} on", [String(s.onCount), String(s.lightCount)]))
                     .font(store.scaledFont(11, weight: .medium))
+                    .lineLimit(1)
+                    .fixedSize()
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(Capsule().fill(Color.primary.opacity(0.08)))
-            }
-            if mode == .popover {
-                Button {
-                    openWindow(id: "main-window")
-                    NSApp.activate(ignoringOtherApps: true)
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 13))
-                        .frame(width: 24, height: 24)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .help(store.tr("Open in window"))
             }
             if store.askAIEnabled && proStore.isUnlocked(.askAI, isDemoMode: store.isDemoMode) {
                 Button {
@@ -308,6 +307,7 @@ struct HeaderView: View {
                 }
                 .buttonStyle(.borderless)
                 .keyboardShortcut("k", modifiers: .command)
+                .accessibilityLabel(store.tr("Ask AI (⌘K)"))
                 .help(store.tr("Ask AI (⌘K)"))
             }
 
@@ -320,6 +320,7 @@ struct HeaderView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel(store.tr("Help & Guide"))
             .help(store.tr("Help & Guide"))
 
             Button {
@@ -331,6 +332,7 @@ struct HeaderView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel(store.tr("Settings"))
             .help(store.tr("Settings"))
         }
     }
@@ -344,39 +346,46 @@ struct TabBarView: View {
         let mapLocked = !proStore.isUnlocked(.floorplan, isDemoMode: store.isDemoMode)
         let rulesLocked = !proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode)
         let synthLocked = !proStore.isUnlocked(.audioSynth, isDemoMode: store.isDemoMode)
-        HStack(spacing: 4) {
-            tabButton(.lights, title: store.tr("Lights"), symbol: "lightbulb", badge: nil, activeDot: false, locked: false)
-            tabButton(.map, title: store.tr("Map"), symbol: "map", badge: nil,
-                      activeDot: !mapLocked && store.pendingFloorplanSyncPlan.hasRoomOrMetaChanges, locked: mapLocked)
-            tabButton(.schedules, title: store.tr("Schedules"), symbol: "clock",
-                      badge: store.allSchedules.isEmpty ? nil : store.allSchedules.count, activeDot: false, locked: false)
-            tabButton(.rules, title: store.tr("Rules"), symbol: "link",
-                      badge: (rulesLocked || store.rules.isEmpty) ? nil : store.rules.count, activeDot: false, locked: rulesLocked)
-            tabButton(.synth, title: store.tr("Synth"), symbol: "waveform", badge: nil,
-                      activeDot: !synthLocked && store.synthRunning, locked: synthLocked)
+        GeometryReader { geo in
+            let compact = geo.size.width < 520
+            HStack(spacing: compact ? 2 : 4) {
+                tabButton(.lights, title: store.tr("Lights"), symbol: "lightbulb", badge: nil, activeDot: false, locked: false, compact: compact)
+                tabButton(.map, title: store.tr("Map"), symbol: "map", badge: nil,
+                          activeDot: !mapLocked && store.pendingFloorplanSyncPlan.hasRoomOrMetaChanges, locked: mapLocked, compact: compact)
+                tabButton(.schedules, title: store.tr("Schedules"), symbol: "clock",
+                          badge: store.allSchedules.isEmpty ? nil : store.allSchedules.count, activeDot: false, locked: false, compact: compact)
+                tabButton(.rules, title: store.tr("Rules"), symbol: "link",
+                          badge: (rulesLocked || store.rules.isEmpty) ? nil : store.rules.count, activeDot: false, locked: rulesLocked, compact: compact)
+                tabButton(.synth, title: store.tr("Synth"), symbol: "waveform", badge: nil,
+                          activeDot: !synthLocked && store.synthRunning, locked: synthLocked, compact: compact)
+            }
+            .padding(3)
+            .background(
+                RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
+                    .fill(store.cardBackgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
+                    .strokeBorder(store.cardBorderColor, lineWidth: 0.75)
+            )
         }
-        .padding(3)
-        .background(
-            RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
-                .fill(store.cardBackgroundColor)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: store.smallRadius + 2, style: .continuous)
-                .strokeBorder(store.cardBorderColor, lineWidth: 0.75)
-        )
+        .frame(height: 32)
     }
 
-    private func tabButton(_ tab: HueStore.MainTab, title: String, symbol: String, badge: Int?, activeDot: Bool, locked: Bool) -> some View {
+    private func tabButton(_ tab: HueStore.MainTab, title: String, symbol: String, badge: Int?, activeDot: Bool, locked: Bool, compact: Bool) -> some View {
         let selected = store.tab == tab
         return Button {
             withAnimation(.easeInOut(duration: 0.15)) { store.tab = tab }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: symbol)
-                    .font(store.scaledFont(10.5, weight: .medium))
+            HStack(spacing: compact ? 3 : 4) {
+                if !compact {
+                    Image(systemName: symbol)
+                        .font(store.scaledFont(10.5, weight: .medium))
+                }
                 Text(title)
-                    .font(store.scaledFont(11.5, weight: selected ? .semibold : .regular))
+                    .font(store.scaledFont(compact ? 11 : 11.5, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 if locked {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 8, weight: .semibold))
@@ -395,6 +404,7 @@ struct TabBarView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            .padding(.horizontal, compact ? 3 : 4)
             .padding(.vertical, 5)
             .foregroundStyle(selected ? Color.white : Color.primary)
             .background(
@@ -404,12 +414,14 @@ struct TabBarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .help(title)
     }
 }
 
 struct MainView: View {
     @EnvironmentObject var store: HueStore
-    var mode: ContentView.DisplayMode = .popover
+    var mode: ContentView.DisplayMode = .detached
 
     var body: some View {
         VStack(spacing: 0) {
@@ -423,7 +435,7 @@ struct MainView: View {
                     Divider()
                     FooterView()
                 case .map:
-                    MapView(isCompact: mode == .popover)
+                    MapView()
                 case .schedules:
                     SchedulesView()
                 case .rules:
@@ -434,6 +446,8 @@ struct MainView: View {
             } else {
                 ScrollView {
                     PairingView()
+                        .frame(maxWidth: 740)
+                        .frame(maxWidth: .infinity)
                         .padding(16)
                 }
             }
@@ -476,10 +490,12 @@ struct FooterView: View {
             } label: {
                 Label(store.tr("All lights on"), systemImage: "sun.max.fill")
                     .font(store.scaledFont(12, weight: .medium))
+                    .lineLimit(1)
                     .padding(.horizontal, 4)
             }
             .buttonStyle(.bordered)
             .disabled(allOnDisabled)
+            .accessibilityLabel(store.tr("All lights on"))
             .help(store.tr("Switch every light on"))
             .popover(isPresented: $store.confirmAllOnPrompt, arrowEdge: .top) {
                 VStack(alignment: .leading, spacing: 10) {
@@ -507,11 +523,13 @@ struct FooterView: View {
             } label: {
                 Label(store.tr("All lights off"), systemImage: "power")
                     .font(store.scaledFont(12, weight: .medium))
+                    .lineLimit(1)
                     .padding(.horizontal, 4)
             }
             .buttonStyle(.borderedProminent)
             .tint(Color.red)
             .disabled(!store.snapshot.anyLightOn)
+            .accessibilityLabel(store.tr("All lights off"))
             .help(store.tr("Switch every light off"))
 
             Spacer()
@@ -524,6 +542,7 @@ struct FooterView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel(store.tr("Refresh"))
             .help(store.tr("Refresh"))
         }
         .padding(.horizontal, 16)
@@ -559,7 +578,7 @@ struct WindowObserver: NSViewRepresentable {
     }
 
     final class ObserverView: NSView {
-        var mode: ContentView.DisplayMode = .popover
+        var mode: ContentView.DisplayMode = .detached
         var savedFrame: SavedWindowFrame?
         var preferredColorScheme: ColorScheme?
         var onChange: ((Bool) -> Void)?
@@ -596,7 +615,9 @@ struct WindowObserver: NSViewRepresentable {
             let center = NotificationCenter.default
             if let old = observed {
                 center.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: old)
-                center.removeObserver(self, name: NSWindow.didResignKeyNotification, object: old)
+                center.removeObserver(self, name: NSWindow.didMiniaturizeNotification, object: old)
+                center.removeObserver(self, name: NSWindow.didDeminiaturizeNotification, object: old)
+                center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: old)
                 center.removeObserver(self, name: NSWindow.didResizeNotification, object: old)
                 center.removeObserver(self, name: NSWindow.didMoveNotification, object: old)
                 center.removeObserver(self, name: NSWindow.willCloseNotification, object: old)
@@ -605,54 +626,63 @@ struct WindowObserver: NSViewRepresentable {
             observed = window
             guard let window = window else { return }
             applyWindowAppearance()
-            center.addObserver(self, selector: #selector(becameKey(_:)),
+            window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable])
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isMovable = true
+            window.isMovableByWindowBackground = false
+            window.minSize = NSSize(width: 460, height: 460)
+            window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+            window.isRestorable = false
+            window.setFrameAutosaveName("")
+
+            center.addObserver(self, selector: #selector(visibilityChanged(_:)),
                                name: NSWindow.didBecomeKeyNotification, object: window)
-            center.addObserver(self, selector: #selector(resignedKey(_:)),
-                               name: NSWindow.didResignKeyNotification, object: window)
-            if mode == .detached {
-                window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable])
-                window.isMovable = true
-                window.isMovableByWindowBackground = true
-                window.minSize = NSSize(width: 460, height: 460)
-                window.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-                window.isRestorable = false
-                window.setFrameAutosaveName("")
-                center.addObserver(self, selector: #selector(frameChanged(_:)),
-                                   name: NSWindow.didResizeNotification, object: window)
-                center.addObserver(self, selector: #selector(frameChanged(_:)),
-                                   name: NSWindow.didMoveNotification, object: window)
-                center.addObserver(self, selector: #selector(willClose(_:)),
-                                   name: NSWindow.willCloseNotification, object: window)
-                center.addObserver(self, selector: #selector(willClose(_:)),
-                                   name: NSApplication.willTerminateNotification, object: nil)
-                if !restoredWindow, let saved = savedFrame {
-                    restoredWindow = true
-                    let screens = NSScreen.screens.map { s in
-                        let vf = s.visibleFrame
-                        return SavedWindowFrame(
-                            x: Double(vf.origin.x),
-                            y: Double(vf.origin.y),
-                            width: Double(vf.size.width),
-                            height: Double(vf.size.height)
-                        )
-                    }
-                    let clamped = saved.clamped(to: screens)
-                    let rect = NSRect(x: clamped.x, y: clamped.y, width: clamped.width, height: clamped.height)
-                    DispatchQueue.main.async { [weak window] in
-                        window?.setFrame(rect, display: true)
-                    }
+            center.addObserver(self, selector: #selector(visibilityChanged(_:)),
+                               name: NSWindow.didMiniaturizeNotification, object: window)
+            center.addObserver(self, selector: #selector(visibilityChanged(_:)),
+                               name: NSWindow.didDeminiaturizeNotification, object: window)
+            center.addObserver(self, selector: #selector(visibilityChanged(_:)),
+                               name: NSWindow.didChangeOcclusionStateNotification, object: window)
+            center.addObserver(self, selector: #selector(frameChanged(_:)),
+                               name: NSWindow.didResizeNotification, object: window)
+            center.addObserver(self, selector: #selector(frameChanged(_:)),
+                               name: NSWindow.didMoveNotification, object: window)
+            center.addObserver(self, selector: #selector(willClose(_:)),
+                               name: NSWindow.willCloseNotification, object: window)
+            center.addObserver(self, selector: #selector(willClose(_:)),
+                               name: NSApplication.willTerminateNotification, object: nil)
+
+            if !restoredWindow, let saved = savedFrame {
+                restoredWindow = true
+                let screens = NSScreen.screens.map { s in
+                    let vf = s.visibleFrame
+                    return SavedWindowFrame(
+                        x: Double(vf.origin.x),
+                        y: Double(vf.origin.y),
+                        width: Double(vf.size.width),
+                        height: Double(vf.size.height)
+                    )
                 }
+                let clamped = saved.clamped(to: screens, minWidth: 460, minHeight: 460)
+                let rect = NSRect(x: clamped.x, y: clamped.y, width: clamped.width, height: clamped.height)
+                window.setFrame(rect, display: true)
             }
-            if window.isKeyWindow {
-                Task { @MainActor [weak self] in self?.onChange?(true) }
-            }
+            notifyVisibility(for: window)
         }
 
-        @objc private func becameKey(_ note: Notification) { onChange?(true) }
-        @objc private func resignedKey(_ note: Notification) { onChange?(false) }
+        private func notifyVisibility(for window: NSWindow) {
+            let visible = window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+            Task { @MainActor [weak self] in self?.onChange?(visible) }
+        }
+
+        @objc private func visibilityChanged(_ note: Notification) {
+            guard let window = observed else { return }
+            notifyVisibility(for: window)
+        }
 
         @objc private func frameChanged(_ note: Notification) {
-            guard mode == .detached, let window = observed else { return }
+            guard let window = observed else { return }
             let f = window.frame
             let snapshot = SavedWindowFrame(
                 x: Double(f.origin.x),
@@ -669,7 +699,8 @@ struct WindowObserver: NSViewRepresentable {
         }
 
         @objc private func willClose(_ note: Notification) {
-            guard mode == .detached, let window = observed else { return }
+            guard let window = observed else { return }
+            onChange?(false)
             saveWorkItem?.cancel()
             saveWorkItem = nil
             let f = window.frame

@@ -104,8 +104,8 @@ public struct SavedWindowFrame: Equatable, Codable, Sendable {
     /// Clamps this frame so it fits cleanly inside the best matching visible screen rectangle.
     public func clamped(
         to visibleScreens: [SavedWindowFrame],
-        minWidth: Double = 520,
-        minHeight: Double = 500
+        minWidth: Double = 460,
+        minHeight: Double = 460
     ) -> SavedWindowFrame {
         guard !visibleScreens.isEmpty else {
             return SavedWindowFrame(

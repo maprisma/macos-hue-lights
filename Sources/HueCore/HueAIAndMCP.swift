@@ -2202,12 +2202,12 @@ public final class HeadlessHueToolBackend: HueToolBackend {
 
 // MARK: - Native Swift MCP JSON-RPC 2.0 Stdio Server
 
-/// Pure-Foundation Model Context Protocol (MCP) JSON-RPC 2.0 stdio server (`MaprismaHueLights --mcp`).
-/// Zero external packages, local-only, never exposes Hue Bridge credentials (`appKey` / `clientKey` / `fingerprint`).
+/// Pure-Foundation Model Context Protocol (MCP) JSON-RPC 2.0 stdio server (`"Maprisma Lights" --mcp`).
+/// Zero external packages, local-only, never exposes bridge credentials (`appKey` / `clientKey` / `fingerprint`).
 @MainActor
 public final class HueMCPServer {
     public static let protocolVersion = "2024-11-05"
-    public static let serverName = "maprisma-hue-lights"
+    public static let serverName = "maprisma-lights"
     public static let serverVersion = "1.0.0"
     public static let stateResourceURI = "hue://state"
     public static let maxRequestLineBytes = 512 * 1024

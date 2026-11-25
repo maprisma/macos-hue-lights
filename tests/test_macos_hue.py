@@ -416,7 +416,7 @@ class SwiftAppTests(unittest.TestCase):
         self.assertIn('"lightbulb.fill" : "lightbulb"', app)
         content = read("Sources", "MaprismaHueLights", "ContentView.swift")
         self.assertIn("maxWidth: .infinity", content)
-        self.assertIn("isMovableByWindowBackground = true", content)
+        self.assertIn("isMovableByWindowBackground = false", content)
 
     def test_pure_swift_and_sandbox_contract(self):
         self.assertFalse(os.path.exists(os.path.join(ROOT, "Sources", "HueCore", "HelperSupervisor.swift")))
@@ -758,7 +758,7 @@ class SwiftAppTests(unittest.TestCase):
             "case skins",
             "case askAI",
             "public struct ProAccessPolicy: Sendable",
-            'public static let proProductID = "com.maprisma.huelights.pro"',
+            'public static let proProductID = "com.maprisma.lights.pro"',
             "public static func mode(isProUnlocked: Bool, isDemoMode: Bool) -> AppAccessMode",
             "public static func isUnlocked(_ feature: ProFeature, isProUnlocked: Bool, isDemoMode: Bool) -> Bool",
             "public static func isSkinFree(_ skin: String) -> Bool",
@@ -859,14 +859,14 @@ class SwiftAppTests(unittest.TestCase):
         self.assertIn("products", storekit)
         self.assertEqual(len(storekit["products"]), 1)
         prod = storekit["products"][0]
-        self.assertEqual(prod["productID"], "com.maprisma.huelights.pro")
+        self.assertEqual(prod["productID"], "com.maprisma.lights.pro")
         self.assertEqual(prod["type"], "NonConsumable")
         self.assertEqual(prod["displayPrice"], "9.99")
         locales = {loc["locale"] for loc in prod["localizations"]}
         self.assertTrue({"en_US", "de_DE"}.issubset(locales))
 
         launch_kit = read("MacAppStore", "LAUNCH-KIT.md")
-        self.assertIn("com.maprisma.huelights.pro", launch_kit)
+        self.assertIn("com.maprisma.lights.pro", launch_kit)
         self.assertIn("MaprismaHueLights.storekit", launch_kit)
 
     def test_build_and_install_scripts(self):

@@ -1,9 +1,9 @@
 import Foundation
 
-/// High-level access tier for Maprisma Hue Lights:
-/// - `free`: Real Philips Hue Bridge connected without Pro unlock (Rooms, Zones, Lights, Scenes, Pairing, Help, Native skin).
-/// - `demo`: Interactive simulated Hue home where ALL Pro features are unlocked for risk-free evaluation & App Store Review.
-/// - `pro`: Verified one-time StoreKit 2 Non-Consumable Pro unlock (`com.maprisma.huelights.pro`).
+/// High-level access tier for Maprisma Lights:
+/// - `free`: Real smart lighting connected without Pro unlock (Rooms, Zones, Lights, Scenes, Schedules, Pairing, Help, Native skin).
+/// - `demo`: Interactive simulated smart home where ALL Pro features are unlocked for risk-free evaluation & App Store Review.
+/// - `pro`: Verified one-time StoreKit 2 Non-Consumable Pro unlock (`com.maprisma.lights.pro`).
 public enum AppAccessMode: String, Codable, Sendable, Equatable {
     case free
     case demo
@@ -26,7 +26,7 @@ public enum ProFeature: String, CaseIterable, Identifiable, Sendable {
 /// In GUI builds, `isProUnlocked` must be sourced strictly from StoreKit 2 (`Transaction.currentEntitlements`).
 public struct ProAccessPolicy: Sendable {
     /// Non-Consumable In-App Purchase Product ID in App Store Connect & `MaprismaHueLights.storekit`.
-    public static let proProductID = "com.maprisma.huelights.pro"
+    public static let proProductID = "com.maprisma.lights.pro"
 
     /// Resolves the active access mode. Pro takes precedence over Demo, which takes precedence over Free.
     public static func mode(isProUnlocked: Bool, isDemoMode: Bool) -> AppAccessMode {

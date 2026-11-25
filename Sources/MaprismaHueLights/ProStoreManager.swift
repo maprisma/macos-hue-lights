@@ -3,7 +3,7 @@ import Foundation
 import HueCore
 import StoreKit
 
-/// StoreKit 2 manager for the one-time Non-Consumable Pro unlock (`com.maprisma.huelights.pro`).
+/// StoreKit 2 manager for the one-time Non-Consumable Pro unlock (`com.maprisma.lights.pro`).
 /// 100% macOS 13+ compatible using `ObservableObject` and `@Published`.
 /// Entitlement status is verified cryptographically via `Transaction.currentEntitlements` and `Transaction.updates`.
 @MainActor
@@ -13,8 +13,10 @@ public final class ProStoreManager: ObservableObject {
     }
 
     @Published public private(set) var isProUnlocked: Bool = false
+    @Published public private(set) var hasVerifiedEntitlements: Bool = false
     @Published public private(set) var proProduct: Product? = nil
     @Published public private(set) var isLoading: Bool = false
+    @Published public private(set) var productLoadFailed: Bool = false
     @Published public private(set) var isPurchasing: Bool = false
     @Published public private(set) var statusMessage: String? = nil
     @Published public private(set) var errorMessage: String? = nil
@@ -96,14 +98,20 @@ public final class ProStoreManager: ObservableObject {
 
     public func loadProductAndEntitlements() async {
         isLoading = true
+        productLoadFailed = false
         defer { isLoading = false }
 
         do {
             let products = try await Product.products(for: [ProAccessPolicy.proProductID])
             proProduct = products.first
+            if proProduct == nil {
+                productLoadFailed = true
+                errorMessage = tr("Could not load the Pro product from the App Store.")
+            }
         } catch {
-            // Keep fallback price silently at startup (e.g. offline or local dev builds).
             proProduct = nil
+            productLoadFailed = true
+            errorMessage = tr("Could not load the Pro product from the App Store.")
         }
 
         await refreshEntitlements()
@@ -120,7 +128,8 @@ public final class ProStoreManager: ObservableObject {
             }
         }
         isProUnlocked = unlocked
-        try? SettingsStore().setLastVerifiedPro(unlocked)
+        hasVerifiedEntitlements = true
+        HueStore.shared.persistLastVerifiedPro(unlocked)
     }
 
     /// Runs the one-time Non-Consumable purchase flow with graceful handling of cancellation, pending, and errors.
@@ -153,7 +162,8 @@ public final class ProStoreManager: ObservableObject {
                 let transaction = try checkVerified(verification)
                 if transaction.productID == ProAccessPolicy.proProductID && transaction.revocationDate == nil {
                     isProUnlocked = true
-                    try? SettingsStore().setLastVerifiedPro(true)
+                    hasVerifiedEntitlements = true
+                    HueStore.shared.persistLastVerifiedPro(true)
                     statusMessage = tr("Pro unlocked!")
                 }
                 await transaction.finish()
@@ -195,7 +205,8 @@ public final class ProStoreManager: ObservableObject {
         if transaction.productID == ProAccessPolicy.proProductID {
             let active = (transaction.revocationDate == nil)
             isProUnlocked = active
-            try? SettingsStore().setLastVerifiedPro(active)
+            hasVerifiedEntitlements = true
+            HueStore.shared.persistLastVerifiedPro(active)
         }
         await transaction.finish()
     }

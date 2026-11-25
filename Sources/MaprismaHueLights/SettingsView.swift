@@ -524,24 +524,29 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4)
+
+                    HStack(spacing: 12) {
+                        let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
+                        Text("Maprisma Lights v\(appVersion)")
+                            .font(store.scaledFont(10.5))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if let privacyURL = URL(string: "https://maprisma.com/lights-privacy.html") {
+                            Link(store.tr("Privacy Policy"), destination: privacyURL)
+                                .font(store.scaledFont(10.5))
+                        }
+                        if let supportURL = URL(string: "mailto:support@maprisma.com") {
+                            Link(store.tr("Support"), destination: supportURL)
+                                .font(store.scaledFont(10.5))
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 6)
                 }
+                .frame(maxWidth: 740)
+                .frame(maxWidth: .infinity)
                 .padding(16)
             }
-
-            Divider()
-
-            HStack {
-                Spacer()
-                Button {
-                    store.quit()
-                } label: {
-                    Label(store.tr("Quit Maprisma Lights"), systemImage: "power")
-                        .font(store.scaledFont(12))
-                }
-                .keyboardShortcut("q", modifiers: .command)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
         }
     }
 

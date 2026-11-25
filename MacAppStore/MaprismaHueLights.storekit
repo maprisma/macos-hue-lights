@@ -10,24 +10,24 @@
       "internalID" : "6700000001",
       "localizations" : [
         {
-          "description" : "One-time purchase unlocking Visual Floorplan Studio v2 (polygons, multi-floor, gallery & lighting planner), Visual Rules & Sensors, Bridge Pro MotionAware, Audio Light Synth, all 6 Skins, and optional local-first Ask AI.",
+          "description" : "One-time purchase unlocking Visual Floorplan Studio v2 (polygons, multi-floor, gallery & lighting planner), Visual Rules & Sensors, Presence & Motion Areas, Audio Light Synth, all 6 Skins, and optional local-first Ask AI.",
           "displayName" : "Maprisma Lights Pro",
           "locale" : "en_US"
         },
         {
-          "description" : "Einmalkauf ohne Abo: Visuelles Grundriss-Studio v2 (Polygone, Etagen, Galerie & Lichtplaner), visuelle Regeln & Sensoren, Bridge Pro MotionAware, Audio-Licht-Synthesizer, alle 6 Skins sowie optionales lokales Ask AI.",
+          "description" : "Einmalkauf ohne Abo: Visuelles Grundriss-Studio v2 (Polygone, Etagen, Galerie & Lichtplaner), visuelle Regeln & Sensoren, Präsenz- & Bewegungsbereiche, Audio-Licht-Synthesizer, alle 6 Skins sowie optionales lokales Ask AI.",
           "displayName" : "Maprisma Lights Pro",
           "locale" : "de_DE"
         }
       ],
-      "productID" : "com.maprisma.huelights.pro",
+      "productID" : "com.maprisma.lights.pro",
       "referenceName" : "Maprisma Lights Pro",
       "type" : "NonConsumable"
     }
   ],
   "settings" : {
     "_applicationInternalID" : "6700000000",
-    "_developerTeamID" : "MAPRISMA01",
+    "_developerTeamID" : "NTSV3ZSSAK",
     "_failTransactionsEnabled" : false,
     "_lastSynchronizedDate" : 785700000.0,
     "_locale" : "en_US",

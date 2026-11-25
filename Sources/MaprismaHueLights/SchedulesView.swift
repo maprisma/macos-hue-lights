@@ -59,6 +59,8 @@ struct SchedulesView: View {
                             ScheduleCard(schedule: schedule)
                         }
                     }
+                    .frame(maxWidth: 780)
+                    .frame(maxWidth: .infinity)
                     .padding(12)
                 }
             }
@@ -75,6 +77,7 @@ struct SchedulesView: View {
 private struct ScheduleCard: View {
     @EnvironmentObject var store: HueStore
     let schedule: HueSchedule
+    @State private var confirmDelete: Bool = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -109,7 +112,7 @@ private struct ScheduleCard: View {
 
             Spacer(minLength: 4)
 
-            Toggle("", isOn: Binding(
+            Toggle(schedule.name, isOn: Binding(
                 get: { schedule.enabled },
                 set: { store.toggleSchedule(schedule, enabled: $0) }
             ))
@@ -117,17 +120,35 @@ private struct ScheduleCard: View {
             .labelsHidden()
             .controlSize(.small)
 
-            Button(role: .destructive) {
-                store.deleteSchedule(schedule)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+            if confirmDelete {
+                HStack(spacing: 4) {
+                    Button(store.tr("Delete"), role: .destructive) {
+                        confirmDelete = false
+                        store.deleteSchedule(schedule)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.red)
+                    .controlSize(.mini)
+                    Button(store.tr("Cancel")) {
+                        confirmDelete = false
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+            } else {
+                Button(role: .destructive) {
+                    confirmDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("\(store.tr("Delete")) \(schedule.name)")
+                .help(store.tr("Delete"))
             }
-            .buttonStyle(.borderless)
-            .help(store.tr("Delete"))
         }
         .padding(12)
         .background(
@@ -187,7 +208,9 @@ private struct ScheduleCard: View {
         if set == weekdays { return store.tr("Weekdays") }
         if set == weekend { return store.tr("Weekends") }
         let order = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        return order.filter { set.contains($0) }.map { String($0.prefix(3)).capitalized }.joined(separator: ", ")
+        let syms = Calendar.current.shortWeekdaySymbols // Sun..Sat
+        let monFirst: [String] = syms.count == 7 ? Array(syms[1...6]) + [syms[0]] : order.map { String($0.prefix(3)).capitalized }
+        return zip(order, monFirst).filter { set.contains($0.0) }.map(\.1).joined(separator: ", ")
     }
 
     private var actionText: String {
@@ -230,10 +253,14 @@ private struct NewScheduleSheet: View {
     @State private var brightness: Double = 80
     @State private var fadeMin: Int = 0
 
-    private static let allDays: [(id: String, short: String)] = [
-        ("monday", "M"), ("tuesday", "T"), ("wednesday", "W"), ("thursday", "T"),
-        ("friday", "F"), ("saturday", "S"), ("sunday", "S"),
-    ]
+    private static var allDays: [(id: String, short: String)] {
+        let keys = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        let syms = Calendar.current.shortWeekdaySymbols // Sun..Sat
+        let labels: [String] = syms.count == 7
+            ? (Array(syms[1...6]) + [syms[0]]).map { String($0.prefix(2)) }
+            : ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+        return Array(zip(keys, labels)).map { (id: $0.0, short: $0.1) }
+    }
 
     private var targetOptions: [ScheduleTargetOption] {
         var opts: [ScheduleTargetOption] = []
@@ -412,7 +439,7 @@ private struct NewScheduleSheet: View {
             }
             .padding(14)
         }
-        .frame(width: 400, height: 500)
+        .frame(minWidth: 360, idealWidth: 410, maxWidth: 520, minHeight: 380, idealHeight: 500, maxHeight: 680)
         .fontDesign(store.fontDesign)
         .onAppear {
             if let prefill = prefill {

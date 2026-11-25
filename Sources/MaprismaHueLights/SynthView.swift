@@ -46,6 +46,8 @@ struct SynthView: View {
 
                 targetsCard
             }
+            .frame(maxWidth: 780)
+            .frame(maxWidth: .infinity)
             .padding(12)
         }
     }
@@ -257,7 +259,8 @@ struct SynthView: View {
                 HStack {
                     Text(store.tr("Sensitivity"))
                         .font(store.scaledFont(11.5))
-                        .frame(width: 86, alignment: .leading)
+                        .lineLimit(1)
+                        .frame(minWidth: 100, alignment: .leading)
                     Slider(value: $store.synthSensitivity, in: 0.4...2.2)
                         .controlSize(.small)
                     Text("\(Int((store.synthSensitivity * 100).rounded()))%")
@@ -268,7 +271,8 @@ struct SynthView: View {
                 HStack {
                     Text(store.tr("Smoothness"))
                         .font(store.scaledFont(11.5))
-                        .frame(width: 86, alignment: .leading)
+                        .lineLimit(1)
+                        .frame(minWidth: 100, alignment: .leading)
                     Slider(value: $store.synthSmoothness, in: 0.0...0.85)
                         .controlSize(.small)
                     Text("\(Int((store.synthSmoothness * 100).rounded()))%")

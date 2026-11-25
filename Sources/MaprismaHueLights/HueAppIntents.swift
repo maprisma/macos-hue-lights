@@ -5,36 +5,36 @@ import HueCore
 
 @available(macOS 13.0, *)
 struct AllLightsOffIntent: AppIntent {
-    static var title: LocalizedStringResource = "Turn Off All Hue Lights"
-    static var description = IntentDescription("Switches off every Philips Hue light connected to Maprisma Lights.")
+    static var title: LocalizedStringResource = "Turn Off All Lights"
+    static var description = IntentDescription("Switches off every smart light connected to Maprisma Lights.")
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         await MainActor.run {
             HueStore.shared.allOff()
         }
-        return .result(dialog: "Turned off all Hue lights.")
+        return .result(dialog: "Turned off all lights.")
     }
 }
 
 @available(macOS 13.0, *)
 struct AllLightsOnIntent: AppIntent {
-    static var title: LocalizedStringResource = "Turn On All Hue Lights"
-    static var description = IntentDescription("Switches on all non-excluded Philips Hue rooms.")
+    static var title: LocalizedStringResource = "Turn On All Lights"
+    static var description = IntentDescription("Switches on all non-excluded rooms in Maprisma Lights.")
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         await MainActor.run {
             HueStore.shared.allOn(confirmed: true)
         }
-        return .result(dialog: "Turned on all Hue lights.")
+        return .result(dialog: "Turned on all lights.")
     }
 }
 
 @available(macOS 13.0, *)
 struct ToggleRoomIntent: AppIntent {
-    static var title: LocalizedStringResource = "Toggle Hue Room"
-    static var description = IntentDescription("Toggles a Philips Hue room or zone by name.")
+    static var title: LocalizedStringResource = "Toggle Room"
+    static var description = IntentDescription("Toggles a smart lighting room or zone by name.")
     static var openAppWhenRun: Bool = false
 
     @Parameter(title: "Room Name")
@@ -59,8 +59,8 @@ struct ToggleRoomIntent: AppIntent {
 
 @available(macOS 13.0, *)
 struct RecallSceneIntent: AppIntent {
-    static var title: LocalizedStringResource = "Activate Hue Scene"
-    static var description = IntentDescription("Activates a Philips Hue scene by name.")
+    static var title: LocalizedStringResource = "Activate Scene"
+    static var description = IntentDescription("Activates a lighting scene by name.")
     static var openAppWhenRun: Bool = false
 
     @Parameter(title: "Scene Name")
@@ -86,13 +86,20 @@ struct RecallSceneIntent: AppIntent {
 
 @available(macOS 13.0, *)
 struct ToggleSynthIntent: AppIntent {
-    static var title: LocalizedStringResource = "Toggle Hue Light Synthesizer"
+    static var title: LocalizedStringResource = "Toggle Light Synthesizer"
     static var description = IntentDescription("Starts or stops the audio-reactive Light Synthesizer.")
     static var openAppWhenRun: Bool = false
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let running = await HueStore.shared.toggleSynthFromIntent()
-        return .result(dialog: running ? "Started the Light Synthesizer." : "Stopped the Light Synthesizer.")
+        let outcome = await HueStore.shared.toggleSynthFromIntent()
+        switch outcome {
+        case .started:
+            return .result(dialog: "Started the Light Synthesizer.")
+        case .stopped:
+            return .result(dialog: "Stopped the Light Synthesizer.")
+        case .requiresPro:
+            return .result(dialog: "Light Synthesizer requires Maprisma Lights Pro.")
+        }
     }
 }
 
@@ -103,14 +110,14 @@ struct HueAppShortcuts: AppShortcutsProvider {
             intent: AllLightsOffIntent(),
             phrases: [
                 "Turn off all lights in \(.applicationName)",
-                "All Hue lights off in \(.applicationName)",
+                "All lights off in \(.applicationName)",
             ]
         )
         AppShortcut(
             intent: AllLightsOnIntent(),
             phrases: [
                 "Turn on all lights in \(.applicationName)",
-                "All Hue lights on in \(.applicationName)",
+                "All lights on in \(.applicationName)",
             ]
         )
         AppShortcut(

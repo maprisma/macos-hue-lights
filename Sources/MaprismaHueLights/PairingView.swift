@@ -9,8 +9,21 @@ struct PairingView: View {
     var body: some View {
         let s = store.snapshot
         VStack(alignment: .leading, spacing: 14) {
-            Text(store.tr("Pair a Hue bridge"))
-                .font(store.scaledFont(16, weight: .semibold))
+            HStack(alignment: .center, spacing: 10) {
+                Text(store.tr("Connect Your Lights"))
+                    .font(store.scaledFont(16, weight: .semibold))
+                Spacer()
+                if !s.isPairing {
+                    Button {
+                        store.enterDemoMode()
+                    } label: {
+                        Label(store.tr("Try Demo Home"), systemImage: "house.fill")
+                            .font(store.scaledFont(11.5, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            }
             if s.isPairing {
                 progress(s)
             } else {

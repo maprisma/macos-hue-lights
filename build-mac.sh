@@ -13,7 +13,6 @@ cd "$(dirname "$0")"
 APP_NAME="Maprisma Lights"
 EXECUTABLE="MaprismaHueLights"
 BUNDLE_ID="com.maprisma.lights"
-VERSION="${VERSION:-$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)}"
 VERSION="${VERSION:-1.0.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 APP="dist/$APP_NAME.app"
@@ -136,6 +135,7 @@ PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 plutil -lint "$APP/Contents/Resources/PrivacyInfo.xcprivacy" >/dev/null
 
+xattr -cr "$APP" 2>/dev/null || true
 IDENTITY="${SIGN_IDENTITY:--}"
 if [ "${SANDBOX:-0}" = "1" ] || [ "$IDENTITY" != "-" ]; then
     echo "==> codesign ($IDENTITY, sandboxed)"

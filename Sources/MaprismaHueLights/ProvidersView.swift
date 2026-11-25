@@ -418,7 +418,7 @@ struct AddProviderSheet: View {
             }
             .padding(14)
         }
-        .frame(width: 440, height: 560)
+        .frame(minWidth: 380, idealWidth: 440, maxWidth: 560, minHeight: 380, idealHeight: 560, maxHeight: 720)
         .onAppear {
             if let ed = editing {
                 selectedKind = ed.kind

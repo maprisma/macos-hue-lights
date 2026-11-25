@@ -57,11 +57,12 @@ struct MapView: View {
 
     @EnvironmentObject var store: HueStore
     @EnvironmentObject var proStore: ProStoreManager
-    @Environment(\.openWindow) private var openWindow
-    var isCompact: Bool = false
 
     @State private var mode: MapMode = .map
     @State private var sidebarOpen: Bool = true
+    @State private var studioWidth: CGFloat = 840
+    @State private var didApplyNarrowCollapse: Bool = false
+    @State private var pinchBaseZoom: Double? = nil
     @State private var sidebarFilter: SidebarFilter = .all
     @State private var lampSearch: String = ""
     @State private var showGrid: Bool = true
@@ -140,18 +141,38 @@ struct MapView: View {
                 Divider()
             }
 
-            HStack(spacing: 0) {
-                if sidebarOpen {
-                    lampSidebar
-                        .frame(width: isCompact ? 175 : 215)
-                    Divider()
+            GeometryReader { studioGeo in
+                let isNarrow = studioGeo.size.width < 680
+                let sidebarW: CGFloat = studioGeo.size.width < 780 ? 178 : 215
+                HStack(spacing: 0) {
+                    if sidebarOpen {
+                        lampSidebar
+                            .frame(width: sidebarW)
+                        Divider()
+                    }
+                    canvasWorkspace
                 }
-                canvasWorkspace
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    studioWidth = studioGeo.size.width
+                    if isNarrow {
+                        sidebarOpen = false
+                        didApplyNarrowCollapse = true
+                    }
+                }
+                .onChange(of: studioGeo.size.width) { newW in
+                    studioWidth = newW
+                    if newW < 680 && !didApplyNarrowCollapse {
+                        sidebarOpen = false
+                        didApplyNarrowCollapse = true
+                    } else if newW >= 740 && didApplyNarrowCollapse {
+                        didApplyNarrowCollapse = false
+                    }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
-            sidebarOpen = !isCompact
             consumePendingMapNavigation()
         }
         .onChange(of: store.pendingMapMode) { _ in
@@ -257,7 +278,7 @@ struct MapView: View {
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .controlSize(.small)
-                .frame(width: isCompact ? 168 : 196)
+                .frame(width: studioWidth < 680 ? 168 : 196)
 
                 if mode == .map {
                     // 3. + Add menu (Room shapes, Zone, Furniture stamps including Stairs)
@@ -444,13 +465,15 @@ struct MapView: View {
                     }
                 }
 
-                // 7. Compact Zoom (-, Fit, +) + optional Open-in-window
+                // 7. Compact Zoom (-, Fit, +)
                 HStack(spacing: 2) {
                     Button { adjustZoom(by: -0.15) } label: {
                         Image(systemName: "minus.magnifyingglass").font(.system(size: 11))
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .accessibilityLabel(store.tr("Zoom out"))
+                    .help(store.tr("Zoom out"))
 
                     Button {
                         fitCanvasToContent()
@@ -460,25 +483,16 @@ struct MapView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .accessibilityLabel(store.tr("Fit"))
+                    .help(store.tr("Fit"))
 
                     Button { adjustZoom(by: 0.15) } label: {
                         Image(systemName: "plus.magnifyingglass").font(.system(size: 11))
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                }
-
-                if isCompact {
-                    Button {
-                        openWindow(id: "main-window")
-                        NSApp.activate(ignoringOtherApps: true)
-                    } label: {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help(store.tr("Open in window"))
+                    .accessibilityLabel(store.tr("Zoom in"))
+                    .help(store.tr("Zoom in"))
                 }
             }
             .padding(.horizontal, 10)
@@ -493,38 +507,56 @@ struct MapView: View {
         let plan = store.pendingFloorplanSyncPlan
         let sig = store.floorplanDiffSignature
         if plan.hasRoomOrMetaChanges && !store.floorplan.autoSync && store.dismissedFloorplanDiffKey != sig {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                    .foregroundStyle(store.skinAccentColor)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(store.trf("{0} floorplan change(s) ready to sync to Hue Bridge.", [String(plan.totalChanges)]))
-                        .font(store.scaledFont(11, weight: .medium))
-                    let multiFixture = plan.membershipDiffs.filter { !$0.sharedDeviceLightNames.isEmpty }
-                    if !multiFixture.isEmpty {
-                        Text(store.tr("Note: multi-bulb fixtures move together on the Hue Bridge."))
-                            .font(store.scaledFont(10))
-                            .foregroundStyle(.secondary)
+            let narrow = studioWidth < 640
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                        .foregroundStyle(store.skinAccentColor)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(store.trf("{0} floorplan change(s) ready to sync to Hue Bridge.", [String(plan.totalChanges)]))
+                            .font(store.scaledFont(11, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        let multiFixture = plan.membershipDiffs.filter { !$0.sharedDeviceLightNames.isEmpty }
+                        if !multiFixture.isEmpty {
+                            Text(store.tr("Note: multi-bulb fixtures move together on the Hue Bridge."))
+                                .font(store.scaledFont(10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if !narrow {
+                        Spacer(minLength: 4)
+                        syncBannerActions(sig: sig)
                     }
                 }
-                Spacer(minLength: 4)
-                Button(store.tr("Sync All to Bridge")) {
-                    store.syncAllFloorplanToBridge()
+                if narrow {
+                    HStack(spacing: 8) {
+                        syncBannerActions(sig: sig)
+                        Spacer(minLength: 0)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(store.floorplanSyncing)
-
-                Button(store.tr("Keep visual only")) {
-                    store.dismissedFloorplanDiffKey = sig
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(store.skinAccentColor.opacity(0.11))
             Divider()
         }
+    }
+
+    @ViewBuilder
+    private func syncBannerActions(sig: String) -> some View {
+        Button(store.tr("Sync All to Bridge")) {
+            store.syncAllFloorplanToBridge()
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .disabled(store.floorplanSyncing)
+
+        Button(store.tr("Keep visual only")) {
+            store.dismissedFloorplanDiffKey = sig
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     @ViewBuilder
@@ -1153,6 +1185,34 @@ struct MapView: View {
             }
             .coordinateSpace(name: "floorplanCanvas")
             .clipped()
+            .simultaneousGesture(
+                MagnificationGesture()
+                    .onChanged { value in
+                        if pinchBaseZoom == nil {
+                            pinchBaseZoom = store.floorplan.canvas.zoom
+                        }
+                        if let base = pinchBaseZoom {
+                            let next = min(2.4, max(0.35, base * Double(value)))
+                            store.floorplan.canvas.zoom = next
+                        }
+                    }
+                    .onEnded { _ in
+                        pinchBaseZoom = nil
+                        store.persistFloorplan()
+                    }
+            )
+            .onDeleteCommand {
+                if let stampID = selectedStampID {
+                    store.deleteStamp(id: stampID)
+                    selectedStampID = nil
+                } else if let plannedID = selectedPlannedID {
+                    store.deletePlannedLight(id: plannedID)
+                    selectedPlannedID = nil
+                } else if let boxID = selectedBoxID {
+                    store.deleteFloorplanBox(id: boxID, alsoDeleteOnBridge: false)
+                    selectedBoxID = nil
+                }
+            }
             .onAppear {
                 canvasViewportSize = geo.size
                 if !didInitialFit {
@@ -1222,11 +1282,13 @@ struct MapView: View {
             Text(store.tr("Drag from a lamp or sensor to a lamp to create a rule, or click any line to edit or delete."))
                 .font(store.scaledFont(10.5, weight: .medium))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 5)
-                .background(Capsule().fill(.ultraThinMaterial))
-                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.ultraThinMaterial))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
                 .allowsHitTesting(false)
         }
     }
@@ -2257,8 +2319,8 @@ struct MapView: View {
             return
         }
 
-        // 2) Check linked Room boxes containing the drop point
-        if let box = FloorplanSpatial.boxContaining(x: Double(worldPt.x), y: Double(worldPt.y), in: store.floorplan.boxes, kindFilter: nil),
+        // 2) Check linked Room boxes containing the drop point on the active floor
+        if let box = FloorplanSpatial.boxContaining(x: Double(worldPt.x), y: Double(worldPt.y), in: activeFloorBoxes, kindFilter: nil),
            let hueID = box.hueID {
             let target = WireEndpoint(kind: "room", id: hueID)
             if target != source {
@@ -2456,6 +2518,7 @@ private struct FloorplanRoomBoxView: View {
             }
 
             // Header bar (name, m², Plan-mode lux badge, schedule badge, scenes, inspector, power)
+            let screenBoxW = CGFloat(box.width) * zoom
             HStack(spacing: 4) {
                 Image(systemName: boxSymbol)
                     .font(.system(size: 10, weight: .semibold))
@@ -2465,20 +2528,22 @@ private struct FloorplanRoomBoxView: View {
                     .font(store.scaledFont(11, weight: .semibold))
                     .lineLimit(1)
 
-                if let room = linkedRoom {
+                if screenBoxW >= 155, let room = linkedRoom {
                     Text("\(room.onCount)/\(room.lights.count)")
                         .font(store.scaledFont(9.5).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
 
-                Text(String(format: "%.0f m²", box.areaSquareMeters(pxPerMeter: store.floorplan.pxPerMeter)))
-                    .font(store.scaledFont(8.5).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+                if screenBoxW >= 200 {
+                    Text(String(format: "%.0f m²", box.areaSquareMeters(pxPerMeter: store.floorplan.pxPerMeter)))
+                        .font(store.scaledFont(8.5).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.primary.opacity(0.06)))
+                }
 
-                if let stats = lightingStats {
+                if screenBoxW >= 180, let stats = lightingStats {
                     let lxColor: Color = stats.rating == "balanced" ? .green : (stats.rating == "dim" ? .orange : .cyan)
                     Text("\(stats.lux) lx")
                         .font(store.scaledFont(8.5, weight: .semibold).monospacedDigit())
@@ -2488,7 +2553,7 @@ private struct FloorplanRoomBoxView: View {
                         .background(Capsule().fill(lxColor.opacity(0.16)))
                 }
 
-                if let area = motionArea, area.enabled {
+                if screenBoxW >= 170, let area = motionArea, area.enabled {
                     let active = area.motion
                     HStack(spacing: 2.5) {
                         Image(systemName: "dot.radiowaves.left.and.right")
@@ -2508,7 +2573,7 @@ private struct FloorplanRoomBoxView: View {
                     .help(active ? store.tr("MotionAware presence detected") : store.tr("MotionAware active"))
                 }
 
-                if let firstSched = schedules.first {
+                if screenBoxW >= 230, let firstSched = schedules.first {
                     HStack(spacing: 2) {
                         Image(systemName: "alarm.fill")
                             .font(.system(size: 8.5))
@@ -2532,6 +2597,7 @@ private struct FloorplanRoomBoxView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless)
+                    .accessibilityLabel(store.tr("Scenes & Schedule"))
                     .help(store.tr("Scenes & Schedule"))
                     .popover(isPresented: $scenesPopoverPresented, arrowEdge: .bottom) {
                         if let room = linkedRoom {
@@ -2550,6 +2616,7 @@ private struct FloorplanRoomBoxView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(store.tr("Edit Room / Zone"))
                 .help(store.tr("Edit Room / Zone"))
                 .popover(isPresented: $inspectorPopoverPresented, arrowEdge: .bottom) {
                     RoomBoxInspectorPopover(box: box) {
@@ -2564,6 +2631,7 @@ private struct FloorplanRoomBoxView: View {
                         .foregroundStyle(lit ? tintColor : Color.secondary)
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(lit ? store.tr("Turn off") : store.tr("Turn on"))
                 .help(lit ? store.tr("Turn off") : store.tr("Turn on"))
             }
             .padding(.horizontal, 8)
@@ -3003,16 +3071,18 @@ private struct FloorplanLampNodeView: View {
         .gesture(
             DragGesture(minimumDistance: 2, coordinateSpace: .named("floorplanCanvas"))
                 .onChanged { value in
-                    if mode == .map {
+                    switch mode {
+                    case .map, .plan:
                         onMove(value.location, false)
-                    } else {
+                    case .rules:
                         onWireDragChanged(value.location)
                     }
                 }
                 .onEnded { value in
-                    if mode == .map {
+                    switch mode {
+                    case .map, .plan:
                         onMove(value.location, true)
-                    } else {
+                    case .rules:
                         onWireDragEnded(value.location)
                     }
                 }
@@ -3124,16 +3194,18 @@ private struct FloorplanSensorNodeView: View {
         .gesture(
             DragGesture(minimumDistance: 2, coordinateSpace: .named("floorplanCanvas"))
                 .onChanged { value in
-                    if mode == .map {
+                    switch mode {
+                    case .map, .plan:
                         onMove(value.location, false)
-                    } else {
+                    case .rules:
                         onWireDragChanged(value.location)
                     }
                 }
                 .onEnded { value in
-                    if mode == .map {
+                    switch mode {
+                    case .map, .plan:
                         onMove(value.location, true)
-                    } else {
+                    case .rules:
                         onWireDragEnded(value.location)
                     }
                 }
@@ -3257,6 +3329,7 @@ private struct RoomBoxInspectorPopover: View {
     @State private var linkedHueID: String = ""
     @State private var linkedEntID: String = ""
     @State private var floorID: String = "eg"
+    @State private var confirmDeleteOnBridge: Bool = false
 
     private static let archetypes: [(id: String, label: String)] = [
         ("living_room", "Living Room"),
@@ -3274,29 +3347,31 @@ private struct RoomBoxInspectorPopover: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Text(store.tr("Edit Room / Zone"))
-                .font(store.scaledFont(13, weight: .semibold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 11) {
+                Text(store.tr("Edit Room / Zone"))
+                    .font(store.scaledFont(13, weight: .semibold))
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(store.tr("Name"))
-                    .font(store.scaledFont(10.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                TextField(store.tr("Room name"), text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .onSubmit { saveChanges() }
-            }
-
-            HStack(spacing: 8) {
-                Picker(store.tr("Type"), selection: $kind) {
-                    Text(store.tr("Room")).tag("room")
-                    Text(store.tr("Zone")).tag("zone")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(store.tr("Name"))
+                        .font(store.scaledFont(10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    TextField(store.tr("Room name"), text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .onSubmit { saveChanges() }
                 }
-                .pickerStyle(.segmented)
-                .controlSize(.small)
-                .disabled(box.hueID != nil)
-            }
+
+                HStack(spacing: 8) {
+                    Picker(store.tr("Type"), selection: $kind) {
+                        Text(store.tr("Room")).tag("room")
+                        Text(store.tr("Zone")).tag("zone")
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .disabled(box.hueID != nil)
+                }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(store.tr("Archetype"))
@@ -3450,8 +3525,7 @@ private struct RoomBoxInspectorPopover: View {
                     }
                     if box.hueID != nil {
                         Button(role: .destructive) {
-                            store.deleteFloorplanBox(id: box.id, alsoDeleteOnBridge: true)
-                            onClose()
+                            confirmDeleteOnBridge = true
                         } label: {
                             Text(store.tr("Delete on Hue Bridge too"))
                         }
@@ -3466,9 +3540,38 @@ private struct RoomBoxInspectorPopover: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             }
+
+            if confirmDeleteOnBridge {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(store.tr("Delete on Bridge?"))
+                        .font(store.scaledFont(11, weight: .semibold))
+                        .foregroundStyle(Color.red)
+                    Text(store.tr("This permanently removes the room or zone from your Philips Hue Bridge."))
+                        .font(store.scaledFont(10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button(store.tr("Cancel")) { confirmDeleteOnBridge = false }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                        Spacer()
+                        Button(store.tr("Delete"), role: .destructive) {
+                            store.deleteFloorplanBox(id: box.id, alsoDeleteOnBridge: true)
+                            onClose()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.red)
+                        .controlSize(.mini)
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.red.opacity(0.08)))
+            }
+            }
+            .padding(14)
         }
-        .padding(14)
-        .frame(width: 270)
+        .frame(width: 280)
+        .frame(maxHeight: 480)
         .fontDesign(store.fontDesign)
         .onAppear {
             name = box.name

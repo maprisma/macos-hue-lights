@@ -75,16 +75,31 @@ public final class KeychainStore: KeychainStoring, @unchecked Sendable {
 
     public func load() -> BridgeCredentials? {
         #if canImport(Security)
-        let query: [String: Any] = [
+        let dpQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let dpStatus = SecItemCopyMatching(dpQuery as CFDictionary, &result)
+        if dpStatus == errSecSuccess, let data = result as? Data,
+           let decoded = try? JSONDecoder().decode(BridgeCredentials.self, from: data) {
+            return decoded
+        }
+        // Fallback to legacy login keychain for unsigned dev/test builds or pre-migration installs.
+        let legacyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        var legacyResult: AnyObject?
+        let legacyStatus = SecItemCopyMatching(legacyQuery as CFDictionary, &legacyResult)
+        guard legacyStatus == errSecSuccess, let data = legacyResult as? Data else { return nil }
         return try? JSONDecoder().decode(BridgeCredentials.self, from: data)
         #else
         lock.lock()
@@ -98,11 +113,34 @@ public final class KeychainStore: KeychainStoring, @unchecked Sendable {
         guard let data = try? JSONEncoder().encode(credentials) else {
             throw KeychainError.encodingFailed
         }
-        let baseQuery: [String: Any] = [
+        let dpStatus = saveToKeychain(data: data, useDataProtection: true)
+        if dpStatus == errSecMissingEntitlement {
+            let legacyStatus = saveToKeychain(data: data, useDataProtection: false)
+            guard legacyStatus == errSecSuccess else {
+                throw KeychainError.osStatus(legacyStatus)
+            }
+            return
+        }
+        guard dpStatus == errSecSuccess else {
+            throw KeychainError.osStatus(dpStatus)
+        }
+        #else
+        lock.lock()
+        defer { lock.unlock() }
+        memoryValue = credentials
+        #endif
+    }
+
+    #if canImport(Security)
+    private func saveToKeychain(data: Data, useDataProtection: Bool) -> OSStatus {
+        var baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
+        if useDataProtection {
+            baseQuery[kSecUseDataProtectionKeychain as String] = true
+        }
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
@@ -112,30 +150,32 @@ public final class KeychainStore: KeychainStoring, @unchecked Sendable {
             var addQuery = baseQuery
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw KeychainError.osStatus(addStatus)
-            }
-        } else if updateStatus != errSecSuccess {
-            throw KeychainError.osStatus(updateStatus)
+            return SecItemAdd(addQuery as CFDictionary, nil)
         }
-        #else
-        lock.lock()
-        defer { lock.unlock() }
-        memoryValue = credentials
-        #endif
+        return updateStatus
     }
+    #endif
 
     public func delete() throws {
         #if canImport(Security)
-        let query: [String: Any] = [
+        let dpQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true,
+        ]
+        let dpStatus = SecItemDelete(dpQuery as CFDictionary)
+        guard dpStatus == errSecSuccess || dpStatus == errSecItemNotFound || dpStatus == errSecMissingEntitlement else {
+            throw KeychainError.osStatus(dpStatus)
+        }
+        let legacyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.osStatus(status)
+        let legacyStatus = SecItemDelete(legacyQuery as CFDictionary)
+        guard legacyStatus == errSecSuccess || legacyStatus == errSecItemNotFound else {
+            throw KeychainError.osStatus(legacyStatus)
         }
         #else
         lock.lock()

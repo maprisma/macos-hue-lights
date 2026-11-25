@@ -26,13 +26,13 @@ struct ProUpgradeView: View {
                 id: "rules",
                 symbol: "link",
                 tint: Color(hex: "#a855f7"),
-                title: store.tr("Visual Rules & physical Hue Sensors")
+                title: store.tr("Visual Rules & smart sensors")
             ),
             FeatureItem(
                 id: "motionAware",
                 symbol: "dot.radiowaves.left.and.right",
                 tint: Color(hex: "#06b6d4"),
-                title: store.tr("Hue Bridge Pro MotionAware™ controls")
+                title: store.tr("Presence & motion area controls")
             ),
             FeatureItem(
                 id: "audioSynth",
@@ -174,12 +174,22 @@ struct ProUpgradeView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.green)
+                } else if !proStore.isLoading && !proStore.isProductLoaded {
+                    Button {
+                        Task { await proStore.loadProductAndEntitlements() }
+                    } label: {
+                        Label(store.tr("Retry"), systemImage: "arrow.clockwise")
+                            .font(store.scaledFont(13, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.borderedProminent)
                 } else {
                     Button {
                         Task { await proStore.purchasePro() }
                     } label: {
                         HStack(spacing: 8) {
-                            if proStore.isPurchasing || proStore.isLoading || !proStore.isProductLoaded {
+                            if proStore.isPurchasing || proStore.isLoading {
                                 ProgressView()
                                     .controlSize(.small)
                             }
@@ -195,7 +205,7 @@ struct ProUpgradeView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(proStore.isPurchasing || !proStore.isProductLoaded)
+                    .disabled(proStore.isPurchasing || proStore.isLoading || !proStore.isProductLoaded)
                 }
 
                 HStack(spacing: 8) {
@@ -230,7 +240,7 @@ struct ProUpgradeView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18)
-        .frame(width: 420)
+        .frame(minWidth: 360, idealWidth: 420, maxWidth: 500)
         .onAppear {
             proStore.clearMessages()
             if proStore.proProduct == nil {

@@ -285,7 +285,14 @@ final class HueStore: ObservableObject {
         tab = .lights
     }
 
-    /// Ensures Free mode on a real Hue Bridge falls back cleanly to the free native skin
+    /// Closure injected by `MaprismaHueLightsApp` / `ProStoreManager` so hotkeys & AppIntents respect Pro gating.
+    var isProFeatureUnlocked: ((ProFeature) -> Bool)?
+
+    func persistLastVerifiedPro(_ unlocked: Bool) {
+        try? settings.setLastVerifiedPro(unlocked)
+    }
+
+    /// Ensures Free mode on a real smart-lighting setup falls back cleanly to the free native skin
     /// and stops Pro-only live sessions (e.g. after leaving Demo Mode without a Pro unlock).
     func enforceFreeAccessFallbacks(isProUnlocked: Bool) {
         guard !isProUnlocked && !isDemoMode else { return }
@@ -528,7 +535,14 @@ final class HueStore: ObservableObject {
         case .allOn:
             allOn(confirmed: true)
         case .toggleSynth:
-            toggleSynth()
+            if synthRunning {
+                stopSynth()
+            } else if isProFeatureUnlocked?(.audioSynth) ?? isDemoMode {
+                startSynth()
+            } else {
+                AppDelegate.shared?.showMainWindow()
+                showProUpgradeSheet = true
+            }
         case .toggleFavorite:
             togglePrimaryFavoriteOrFirstRoom()
         }
@@ -633,12 +647,18 @@ final class HueStore: ObservableObject {
         }
     }
 
-    func toggleSynthFromIntent() async -> Bool {
+    enum SynthIntentOutcome { case started, stopped, requiresPro }
+
+    func toggleSynthFromIntent() async -> SynthIntentOutcome {
         if synthRunning {
             stopSynth()
-            return false
+            return .stopped
         }
-        return await startSynthAsync()
+        guard isProFeatureUnlocked?(.audioSynth) ?? isDemoMode else {
+            return .requiresPro
+        }
+        let started = await startSynthAsync()
+        return started ? .started : .stopped
     }
 
     func startSynth() {

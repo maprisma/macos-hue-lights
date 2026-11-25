@@ -189,7 +189,7 @@ struct FloorTabsBar: View {
             .labelsHidden()
             .pickerStyle(.segmented)
             .controlSize(.mini)
-            .frame(width: 152)
+            .fixedSize()
             .help(store.tr("Simulate Day, Dusk, or Night lighting"))
         }
         .padding(.horizontal, 10)
@@ -318,7 +318,7 @@ struct FloorplanGallerySheet: View {
             Divider()
 
             ScrollView {
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
                     ForEach(entries) { entry in
                         let isCurrent = store.floorplan.templateID == entry.id
                         let needsConfirm = !store.floorplan.boxes.isEmpty
@@ -393,7 +393,7 @@ struct FloorplanGallerySheet: View {
                 .padding(14)
             }
         }
-        .frame(width: 580, height: 540)
+        .frame(minWidth: 400, idealWidth: 580, maxWidth: 820, minHeight: 380, idealHeight: 540, maxHeight: 740)
         .fontDesign(store.fontDesign)
     }
 }
@@ -644,7 +644,7 @@ struct PlannedLightInspectorSheet: View {
             }
         }
         .padding(16)
-        .frame(width: 390, height: 510)
+        .frame(minWidth: 360, idealWidth: 410, maxWidth: 520, minHeight: 380, idealHeight: 510, maxHeight: 700)
         .fontDesign(store.fontDesign)
         .onAppear {
             if let item = current {
@@ -680,7 +680,10 @@ struct LightingShoppingListSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(store.tr("Lighting Plan & Shopping List"))
                         .font(store.scaledFont(15, weight: .semibold))
-                    Text("\(planned.count) \(store.tr("Planned Fixtures")) · \(totalLumens) lm · \(String(format: "%.0f", totalPrice))")
+                    let priceSuffix = totalPrice > 0
+                        ? " · \(totalPrice.formatted(.currency(code: Locale.current.currency?.identifier ?? "EUR").precision(.fractionLength(0))))"
+                        : ""
+                    Text("\(planned.count) \(store.tr("Planned Fixtures")) · \(totalLumens) lm\(priceSuffix)")
                         .font(store.scaledFont(11).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -752,7 +755,7 @@ struct LightingShoppingListSheet: View {
                                     }
                                     Spacer()
                                     if item.price > 0 {
-                                        Text(String(format: "%.0f", item.price))
+                                        Text(item.price.formatted(.currency(code: Locale.current.currency?.identifier ?? "EUR").precision(.fractionLength(0))))
                                             .font(store.scaledFont(11, weight: .semibold).monospacedDigit())
                                     }
                                     Button {
@@ -763,6 +766,8 @@ struct LightingShoppingListSheet: View {
                                             .foregroundStyle(.secondary)
                                     }
                                     .buttonStyle(.borderless)
+                                    .accessibilityLabel(store.tr("Delete"))
+                                    .help(store.tr("Delete"))
                                 }
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 6)
@@ -790,7 +795,7 @@ struct LightingShoppingListSheet: View {
             }
             .padding(14)
         }
-        .frame(width: 460, height: 500)
+        .frame(minWidth: 380, idealWidth: 460, maxWidth: 640, minHeight: 380, idealHeight: 500, maxHeight: 720)
         .fontDesign(store.fontDesign)
     }
 

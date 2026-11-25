@@ -1376,7 +1376,7 @@ final class AskAIAndMCPTests: XCTestCase {
 
 final class ProAccessPolicyTests: XCTestCase {
     func testProductIDAndAccessModes() {
-        XCTAssertEqual(ProAccessPolicy.proProductID, "com.maprisma.huelights.pro")
+        XCTAssertEqual(ProAccessPolicy.proProductID, "com.maprisma.lights.pro")
         XCTAssertEqual(ProAccessPolicy.mode(isProUnlocked: false, isDemoMode: false), .free)
         XCTAssertEqual(ProAccessPolicy.mode(isProUnlocked: false, isDemoMode: true), .demo)
         XCTAssertEqual(ProAccessPolicy.mode(isProUnlocked: true, isDemoMode: false), .pro)

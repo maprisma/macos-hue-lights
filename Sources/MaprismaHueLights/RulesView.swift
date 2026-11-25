@@ -138,6 +138,8 @@ struct RulesView: View {
                             )
                         }
                     }
+                    .frame(maxWidth: 780)
+                    .frame(maxWidth: .infinity)
                     .padding(12)
                 }
             }
@@ -160,6 +162,7 @@ struct RulesView: View {
 private struct RuleCard: View {
     @EnvironmentObject var store: HueStore
     let rule: HueRule
+    @State private var confirmDelete: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -206,7 +209,7 @@ private struct RuleCard: View {
 
             Spacer(minLength: 4)
 
-            Toggle("", isOn: Binding(
+            Toggle(rule.name.isEmpty ? kindLabel : rule.name, isOn: Binding(
                 get: { rule.enabled },
                 set: { store.toggleRule(rule, enabled: $0) }
             ))
@@ -214,17 +217,35 @@ private struct RuleCard: View {
             .labelsHidden()
             .controlSize(.small)
 
-            Button(role: .destructive) {
-                store.deleteRule(rule)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
+            if confirmDelete {
+                HStack(spacing: 4) {
+                    Button(store.tr("Delete"), role: .destructive) {
+                        confirmDelete = false
+                        store.deleteRule(rule)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.red)
+                    .controlSize(.mini)
+                    Button(store.tr("Cancel")) {
+                        confirmDelete = false
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+            } else {
+                Button(role: .destructive) {
+                    confirmDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("\(store.tr("Delete")) \(rule.name.isEmpty ? kindLabel : rule.name)")
+                .help(store.tr("Delete"))
             }
-            .buttonStyle(.borderless)
-            .help(store.tr("Delete"))
         }
         .padding(12)
         .background(
@@ -573,7 +594,7 @@ private struct NewRuleSheet: View {
             }
             .padding(14)
         }
-        .frame(width: 410, height: 530)
+        .frame(minWidth: 360, idealWidth: 420, maxWidth: 540, minHeight: 380, idealHeight: 530, maxHeight: 700)
         .fontDesign(store.fontDesign)
         .onAppear {
             if let prefill = prefill {

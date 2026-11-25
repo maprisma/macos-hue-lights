@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Combine
 import Dispatch
 import Foundation
@@ -39,9 +40,88 @@ struct MaprismaHueLightsApp: App {
             ContentView(mode: .detached)
                 .environmentObject(store)
                 .environmentObject(proStore)
+                .task {
+                    let pro = proStore
+                    let hue = store
+                    hue.isProFeatureUnlocked = { [weak pro, weak hue] feature in
+                        guard let pro, let hue else { return false }
+                        return pro.isUnlocked(feature, isDemoMode: hue.isDemoMode)
+                    }
+                    pro.start()
+                }
         }
         .defaultSize(width: 840, height: 660)
         .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button(store.tr("Settings")) {
+                    appDelegate.showMainWindow()
+                    store.page = store.page == .settings ? .main : .settings
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+            CommandGroup(replacing: .help) {
+                Button(store.tr("Help & Guide")) {
+                    appDelegate.showMainWindow()
+                    store.page = .help
+                }
+            }
+            CommandMenu(store.tr("Lights")) {
+                Button(store.tr("Refresh")) {
+                    store.refresh()
+                }
+                .keyboardShortcut("r", modifiers: .command)
+
+                Divider()
+
+                Button(store.tr("Lights")) {
+                    appDelegate.showMainWindow()
+                    store.page = .main
+                    store.tab = .lights
+                }
+                .keyboardShortcut("1", modifiers: .command)
+
+                Button(store.tr("Map")) {
+                    appDelegate.showMainWindow()
+                    store.page = .main
+                    store.tab = .map
+                }
+                .keyboardShortcut("2", modifiers: .command)
+
+                Button(store.tr("Schedules")) {
+                    appDelegate.showMainWindow()
+                    store.page = .main
+                    store.tab = .schedules
+                }
+                .keyboardShortcut("3", modifiers: .command)
+
+                Button(store.tr("Rules")) {
+                    appDelegate.showMainWindow()
+                    store.page = .main
+                    store.tab = .rules
+                }
+                .keyboardShortcut("4", modifiers: .command)
+
+                Button(store.tr("Synth")) {
+                    appDelegate.showMainWindow()
+                    store.page = .main
+                    store.tab = .synth
+                }
+                .keyboardShortcut("5", modifiers: .command)
+
+                Divider()
+
+                Button(store.tr("All lights on")) {
+                    store.allOn(confirmed: true)
+                }
+                .disabled(store.snapshot.lightCount == 0)
+
+                Button(store.tr("All lights off")) {
+                    store.allOff()
+                }
+                .disabled(!store.snapshot.anyLightOn)
+            }
+        }
     }
 }
 
@@ -71,9 +151,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusBarItem()
         HueStore.shared.start()
 
+        let launchedAtLogin = Self.isLaunchedAsLoginItem()
         DispatchQueue.main.async { [weak self] in
-            self?.showMainWindow()
+            if launchedAtLogin {
+                self?.existingMainWindow()?.orderOut(nil)
+            } else {
+                self?.showMainWindow()
+            }
         }
+    }
+
+    private static func isLaunchedAsLoginItem() -> Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
+        return event.eventID == AEEventID(kAEOpenApplication)
+            && event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == DescType(keyAELaunchedAsLogInItem)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -101,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func existingMainWindow() -> NSWindow? {
         NSApp.windows.first { win in
-            win.identifier?.rawValue == "main-window" || win.title == "Maprisma Lights"
+            win.identifier?.rawValue.hasPrefix("main-window") == true || win.title == "Maprisma Lights"
         }
     }
 
@@ -187,6 +278,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showItem = NSMenuItem(title: showTitle, action: #selector(menuToggleWindow), keyEquivalent: "")
         showItem.target = self
         menu.addItem(showItem)
+
+        let settingsItem = NSMenuItem(title: store.tr("Settings"), action: #selector(menuOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        if store.isDemoMode {
+            let exitDemoItem = NSMenuItem(title: store.tr("Connect Bridge"), action: #selector(menuExitDemo), keyEquivalent: "")
+            exitDemoItem.target = self
+            menu.addItem(exitDemoItem)
+        } else if !store.snapshot.isPaired {
+            let demoItem = NSMenuItem(title: store.tr("Try Demo Home"), action: #selector(menuEnterDemo), keyEquivalent: "")
+            demoItem.target = self
+            menu.addItem(demoItem)
+        }
+
         menu.addItem(.separator())
 
         let allOnItem = NSMenuItem(title: store.tr("All lights on"), action: #selector(menuAllOn), keyEquivalent: "")
@@ -210,6 +316,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuToggleWindow() { toggleMainWindow() }
+    @objc private func menuOpenSettings() {
+        showMainWindow()
+        HueStore.shared.page = .settings
+    }
+    @objc private func menuEnterDemo() {
+        showMainWindow()
+        HueStore.shared.enterDemoMode()
+    }
+    @objc private func menuExitDemo() {
+        showMainWindow()
+        HueStore.shared.exitDemoMode()
+    }
     @objc private func menuAllOn() { HueStore.shared.allOn(confirmed: true) }
     @objc private func menuAllOff() { HueStore.shared.allOff() }
     @objc private func menuQuit() { NSApp.terminate(nil) }

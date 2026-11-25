@@ -92,7 +92,7 @@ struct RoomsView: View {
                 }
 
                 GeometryReader { geo in
-                    let twoColumns = geo.size.width >= 680
+                    let multiColumn = geo.size.width >= 760
                     let shown = filteredRooms
                     if shown.isEmpty {
                         VStack(spacing: 8) {
@@ -108,11 +108,10 @@ struct RoomsView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ScrollView {
-                            if twoColumns {
+                            if multiColumn {
                                 LazyVGrid(
                                     columns: [
-                                        GridItem(.flexible(), spacing: 12, alignment: .top),
-                                        GridItem(.flexible(), spacing: 12, alignment: .top),
+                                        GridItem(.adaptive(minimum: 360, maximum: 540), spacing: 12, alignment: .top),
                                     ],
                                     alignment: .leading,
                                     spacing: 12
@@ -384,11 +383,18 @@ struct RoomCard: View {
                     }
                     if let area = motionArea {
                         Divider()
-                        Button(area.enabled ? store.tr("Disable MotionAware™") : store.tr("Enable MotionAware™")) {
-                            if proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode) {
+                        let maUnlocked = proStore.isUnlocked(.motionAware, isDemoMode: store.isDemoMode)
+                        Button {
+                            if maUnlocked {
                                 store.updateMotionArea(area, enabled: !area.enabled)
                             } else {
                                 store.showProUpgradeSheet = true
+                            }
+                        } label: {
+                            if maUnlocked {
+                                Text(area.enabled ? store.tr("Disable MotionAware™") : store.tr("Enable MotionAware™"))
+                            } else {
+                                Label(area.enabled ? store.tr("Disable MotionAware™") : store.tr("Enable MotionAware™"), systemImage: "lock.fill")
                             }
                         }
                     }
@@ -397,11 +403,18 @@ struct RoomCard: View {
                         Button(store.tr("Schedule this room …")) {
                             store.openScheduleFor(kind: "room", id: room.id)
                         }
-                        Button(store.tr("Link with another light …")) {
-                            if proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode) {
+                        let rulesUnlocked = proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode)
+                        Button {
+                            if rulesUnlocked {
                                 store.openRuleFor(kind: "room", id: room.id)
                             } else {
                                 store.showProUpgradeSheet = true
+                            }
+                        } label: {
+                            if rulesUnlocked {
+                                Text(store.tr("Link with another light …"))
+                            } else {
+                                Label(store.tr("Link with another light …"), systemImage: "lock.fill")
                             }
                         }
                     }
@@ -415,8 +428,9 @@ struct RoomCard: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .frame(width: 20)
+                .accessibilityLabel(store.l10n.roomName(room))
 
-                Toggle("", isOn: Binding(get: { room.on }, set: { store.setRoom(room, on: $0) }))
+                Toggle(store.l10n.roomName(room), isOn: Binding(get: { room.on }, set: { store.setRoom(room, on: $0) }))
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .controlSize(.small)
@@ -619,6 +633,7 @@ struct LightRow: View {
                 .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(light.name): \(store.tr("Color, warmth & effects"))")
             .help(canPickColor ? store.tr("Color, warmth & effects") : light.name)
             .popover(isPresented: $showColorPopover, arrowEdge: .leading) {
                 LightColorPopover(light: light)
@@ -658,7 +673,7 @@ struct LightRow: View {
 
             if light.dimmable {
                 BrightnessSlider(target: HueStore.target(light: light), bridge: light.on ? light.bri : 1)
-                    .frame(width: 98)
+                    .frame(minWidth: 68, idealWidth: 86, maxWidth: 98)
             }
 
             Menu {
@@ -678,11 +693,18 @@ struct LightRow: View {
                     store.themeEditorLight = light
                 }
                 Divider()
-                Button(store.tr("Wire rule on Map")) {
-                    if proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode) {
+                let rulesUnlocked = proStore.isUnlocked(.rules, isDemoMode: store.isDemoMode)
+                Button {
+                    if rulesUnlocked {
                         store.openMapInRulesMode(wiringLightID: light.id)
                     } else {
                         store.showProUpgradeSheet = true
+                    }
+                } label: {
+                    if rulesUnlocked {
+                        Text(store.tr("Wire rule on Map"))
+                    } else {
+                        Label(store.tr("Wire rule on Map"), systemImage: "lock.fill")
                     }
                 }
                 Button(store.tr("Schedule this light …")) {
@@ -702,9 +724,10 @@ struct LightRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .frame(width: 20)
+            .accessibilityLabel("\(light.name): \(store.tr("Lamp options"))")
             .help(store.tr("Lamp options"))
 
-            Toggle("", isOn: Binding(get: { light.on }, set: { store.setLight(light, on: $0) }))
+            Toggle(light.name, isOn: Binding(get: { light.on }, set: { store.setLight(light, on: $0) }))
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .controlSize(.mini)

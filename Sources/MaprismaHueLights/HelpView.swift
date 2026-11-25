@@ -386,7 +386,7 @@ struct HelpView: View {
         case .lights:
             return store.tr("Lamp icons you choose in Lights sync 1:1 with your Visual Floorplan Map!")
         case .floorplan:
-            return store.tr("Click the expand button in the top-right corner to open the Map in a full resizable desktop window.")
+            return store.tr("Resize the window to any size — or tile it alongside your apps — and pinch to zoom the floorplan canvas.")
         case .rules:
             return store.tr("You can also open any lamp's ⋯ menu in the Lights tab and pick \"Wire rule on Map\" to jump straight into wiring it.")
         case .motionAware:

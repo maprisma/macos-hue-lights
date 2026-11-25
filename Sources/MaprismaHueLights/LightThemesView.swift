@@ -112,7 +112,7 @@ struct LightThemesSheet: View {
             }
             .padding(12)
         }
-        .frame(width: 440, height: 540)
+        .frame(minWidth: 380, idealWidth: 440, maxWidth: 580, minHeight: 380, idealHeight: 540, maxHeight: 700)
         .fontDesign(store.fontDesign)
     }
 

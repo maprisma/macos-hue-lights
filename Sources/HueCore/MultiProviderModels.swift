@@ -398,16 +398,30 @@ public final class ProviderSecretStore: ProviderSecretStoring, @unchecked Sendab
 
     public func loadSecret(for connectionID: String) -> String? {
         #if canImport(Security)
-        let query: [String: Any] = [
+        let dpQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account(for: connectionID),
+            kSecUseDataProtectionKeychain as String: true,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        if SecItemCopyMatching(dpQuery as CFDictionary, &result) == errSecSuccess,
+           let data = result as? Data,
+           let str = String(data: data, encoding: .utf8) {
+            return str
+        }
+        let legacyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account(for: connectionID),
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        var legacyResult: AnyObject?
+        let legacyStatus = SecItemCopyMatching(legacyQuery as CFDictionary, &legacyResult)
+        guard legacyStatus == errSecSuccess, let data = legacyResult as? Data else { return nil }
         return String(data: data, encoding: .utf8)
         #else
         lock.lock()
@@ -429,11 +443,34 @@ public final class ProviderSecretStore: ProviderSecretStoring, @unchecked Sendab
         guard let data = trimmed.data(using: .utf8) else {
             throw KeychainError.encodingFailed
         }
-        let baseQuery: [String: Any] = [
+        let dpStatus = saveSecretToKeychain(data: data, accountName: account(for: connectionID), useDataProtection: true)
+        if dpStatus == errSecMissingEntitlement {
+            let legacyStatus = saveSecretToKeychain(data: data, accountName: account(for: connectionID), useDataProtection: false)
+            guard legacyStatus == errSecSuccess else {
+                throw KeychainError.osStatus(legacyStatus)
+            }
+            return
+        }
+        guard dpStatus == errSecSuccess else {
+            throw KeychainError.osStatus(dpStatus)
+        }
+        #else
+        lock.lock()
+        defer { lock.unlock() }
+        memory[connectionID] = trimmed
+        #endif
+    }
+
+    #if canImport(Security)
+    private func saveSecretToKeychain(data: Data, accountName: String, useDataProtection: Bool) -> OSStatus {
+        var baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account(for: connectionID),
+            kSecAttrAccount as String: accountName,
         ]
+        if useDataProtection {
+            baseQuery[kSecUseDataProtectionKeychain as String] = true
+        }
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
@@ -443,30 +480,32 @@ public final class ProviderSecretStore: ProviderSecretStoring, @unchecked Sendab
             var addQuery = baseQuery
             addQuery[kSecValueData as String] = data
             addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw KeychainError.osStatus(addStatus)
-            }
-        } else if updateStatus != errSecSuccess {
-            throw KeychainError.osStatus(updateStatus)
+            return SecItemAdd(addQuery as CFDictionary, nil)
         }
-        #else
-        lock.lock()
-        defer { lock.unlock() }
-        memory[connectionID] = trimmed
-        #endif
+        return updateStatus
     }
+    #endif
 
     public func deleteSecret(for connectionID: String) throws {
         #if canImport(Security)
-        let query: [String: Any] = [
+        let dpQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account(for: connectionID),
+            kSecUseDataProtectionKeychain as String: true,
+        ]
+        let dpStatus = SecItemDelete(dpQuery as CFDictionary)
+        guard dpStatus == errSecSuccess || dpStatus == errSecItemNotFound || dpStatus == errSecMissingEntitlement else {
+            throw KeychainError.osStatus(dpStatus)
+        }
+        let legacyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account(for: connectionID),
         ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.osStatus(status)
+        let legacyStatus = SecItemDelete(legacyQuery as CFDictionary)
+        guard legacyStatus == errSecSuccess || legacyStatus == errSecItemNotFound else {
+            throw KeychainError.osStatus(legacyStatus)
         }
         #else
         lock.lock()
